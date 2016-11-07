@@ -2195,6 +2195,10 @@ loop:
 			count = 0;
 		}
 
+		/* Wake up purge threads to die - they have MYSQL_THD's and
+		thus might keep open transactions */
+		srv_purge_wakeup();
+
 		goto loop;
 	}
 

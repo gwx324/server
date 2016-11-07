@@ -1166,6 +1166,9 @@ struct srv_slot_t{
 # define srv_file_per_table			1
 #endif /* !UNIV_HOTBACKUP */
 
+MYSQL_THD innobase_create_background_THD();
+void innobase_destroy_background_THD(MYSQL_THD);
+
 #ifdef WITH_WSREP
 UNIV_INTERN
 void

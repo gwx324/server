@@ -46,6 +46,8 @@ Created 5/27/1996 Heikki Tuuri
 #include "eval0eval.h"
 #include "pars0types.h"
 
+void innobase_reset_background_thd();
+
 #define QUE_MAX_LOOPS_WITHOUT_CHECK	16
 
 /* Short introduction to query graphs
@@ -1117,6 +1119,10 @@ que_run_threads_low(
 		/*-------------------------*/
 		next_thr = que_thr_step(thr);
 		/*-------------------------*/
+
+		if (next_thr != thr) {
+			innobase_reset_background_thd();
+		}
 
 		trx_mutex_enter(trx);
 
