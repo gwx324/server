@@ -193,6 +193,7 @@ my @DEFAULT_SUITES= qw(
     unit-
     vcol-
     wsrep-
+    xtrabackup-
   );
 my $opt_suites;
 
