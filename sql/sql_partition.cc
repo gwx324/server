@@ -936,6 +936,7 @@ static bool fix_fields_part_func(THD *thd, Item* func_expr, TABLE *table,
 
   if (init_lex_with_single_table(thd, table, &lex))
     goto end;
+  table->get_fields_in_item_tree= true;
 
   func_expr->walk(&Item::change_context_processor, 0, &lex.select_lex.context);
   thd->where= "partition function";
@@ -4296,6 +4297,7 @@ bool mysql_unpack_partition(THD *thd,
 
   if (init_lex_with_single_table(thd, table, &lex))
     goto end;
+  table->get_fields_in_item_tree= true;
 
   /*
     All Items created is put into a free list on the THD object. This list
