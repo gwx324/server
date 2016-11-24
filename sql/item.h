@@ -1633,6 +1633,7 @@ public:
     timezone-dependent expressions in a (sub)partitioning function.
   */
   virtual bool check_valid_arguments_processor(void *arg) { return 0; }
+  virtual bool update_vcol_processor(void *arg) { return 0; }
   /*============== End of Item processor list ======================*/
 
   virtual Item *get_copy(THD *thd, MEM_ROOT *mem_root)=0;
@@ -2578,6 +2579,7 @@ public:
   bool enumerate_field_refs_processor(void *arg);
   bool update_table_bitmaps_processor(void *arg);
   bool switch_to_nullable_fields_processor(void *arg);
+  bool update_vcol_processor(void *arg);
   bool check_vcol_func_processor(void *arg)
   {
     return mark_unsupported_function(field_name, arg, VCOL_FIELD_REF);
@@ -5071,6 +5073,7 @@ public:
   int save_in_field(Field *field_arg, bool no_conversions);
   table_map used_tables() const { return (table_map)0L; }
   Item_field *field_for_view_update() { return 0; }
+  bool update_vcol_processor(void *arg) { return 0; }
 
   bool walk(Item_processor processor, bool walk_subquery, void *args)
   {
@@ -5119,6 +5122,7 @@ public:
 	    (this->*processor)(args);
   }
   bool check_partition_func_processor(void *int_arg) {return TRUE;}
+  bool update_vcol_processor(void *arg) { return 0; }
   bool check_vcol_func_processor(void *arg)
   {
     return mark_unsupported_function("values()", arg, VCOL_IMPOSSIBLE);
