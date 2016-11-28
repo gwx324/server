@@ -136,6 +136,8 @@ bool	srv_startup_is_before_trx_rollback_phase = false;
 bool	srv_is_being_started = false;
 /** TRUE if SYS_TABLESPACES is available for lookups */
 bool	srv_sys_tablespaces_open = false;
+/** TRUE if SYS_TABLEOPTIONS is available for lookups */
+bool	srv_sys_tableoptions_open = false;
 /** TRUE if the server was successfully started */
 ibool	srv_was_started = FALSE;
 /** TRUE if innobase_start_or_create_for_mysql() has been called */
@@ -450,13 +452,14 @@ create_log_files(
 	sprintf(logfilename + dirnamelen, "ib_logfile%u", INIT_LOG_FILE0);
 
 	/* Disable the doublewrite buffer for log files, not required */
-
+	ulint flags = fsp_flags_set_page_size(0, univ_page_size);
 	fil_space_t*	log_space = fil_space_create(
-		"innodb_redo_log", SRV_LOG_SPACE_FIRST_ID,
-		fsp_flags_set_page_size(0, univ_page_size),
-		FIL_TYPE_LOG,
-		NULL /* No encryption yet */
-		);
+		(const char *)"innodb_redo_log",
+		(ulint)SRV_LOG_SPACE_FIRST_ID,
+		flags,
+		(fil_type_t)FIL_TYPE_LOG,
+		NULL, /* No encryption yet */
+		NULL);
 	ut_a(fil_validate());
 	ut_a(log_space != NULL);
 
@@ -710,9 +713,9 @@ srv_undo_tablespace_open(
 
 		/* Set the compressed page size to 0 (non-compressed) */
 		flags = fsp_flags_init(
-			univ_page_size, false, false, false, false, false, 0, ATOMIC_WRITES_DEFAULT);
+			univ_page_size, false, false, false, false);
 		space = fil_space_create(
-			undo_name, space_id, flags, FIL_TYPE_TABLESPACE, NULL);
+			undo_name, space_id, flags, FIL_TYPE_TABLESPACE, NULL, NULL);
 
 		ut_a(fil_validate());
 		ut_a(space);
@@ -2078,7 +2081,7 @@ innobase_start_or_create_for_mysql(void)
 			SRV_LOG_SPACE_FIRST_ID,
 			fsp_flags_set_page_size(0, univ_page_size),
 			FIL_TYPE_LOG,
-			NULL /* no encryption yet */);
+			NULL /* no encryption yet */, NULL);
 
 		ut_a(fil_validate());
 		ut_a(log_space);
@@ -2309,6 +2312,14 @@ files_checked:
 				return(srv_init_abort(err));
 			}
 
+			/* Open or Create SYS_TABLEOPTIONS
+			so that table options can be found. */
+			srv_sys_tableoptions_open = true;
+			err = dict_create_or_check_sys_table_options();
+			if (err != DB_SUCCESS) {
+				return(srv_init_abort(err));
+			}
+
 			/* The following call is necessary for the insert
 			buffer to work with multiple tablespaces. We must
 			know the mapping between space id's and .ibd file
@@ -2532,6 +2543,13 @@ files_checked:
 		return(srv_init_abort(err));
 	}
 
+	/* Create the SYS_TABLEOPTIONS system table */
+	err = dict_create_or_check_sys_table_options();
+	if (err != DB_SUCCESS) {
+		return(srv_init_abort(err));
+	}
+
+	srv_sys_tableoptions_open = true;
 	srv_is_being_started = false;
 
 	ut_a(trx_purge_state() == PURGE_STATE_INIT);

@@ -25,6 +25,8 @@ Updated 14/02/2015
 ***********************************************************************/
 
 #include "fil0fil.h"
+#include "rem0rec.h"
+#include "dict0tableoptions.h"
 #include "fil0pagecompress.h"
 
 #include <debug_sync.h>

@@ -201,17 +201,13 @@ fsp_flags_to_dict_tf(
 	bool	atomic_blobs	= FSP_FLAGS_HAS_ATOMIC_BLOBS(fsp_flags);
 	bool	data_dir	= FSP_FLAGS_HAS_DATA_DIR(fsp_flags);
 	bool	shared_space	= FSP_FLAGS_GET_SHARED(fsp_flags);
-	bool	page_compressed = FSP_FLAGS_GET_PAGE_COMPRESSION(fsp_flags);
-	ulint	comp_level	= FSP_FLAGS_GET_PAGE_COMPRESSION_LEVEL(fsp_flags);
-	bool	atomic_writes	= FSP_FLAGS_GET_ATOMIC_WRITES(fsp_flags);
 
 	/* FSP_FLAGS_GET_TEMPORARY(fsp_flags) does not have an equivalent
 	flag position in the table flags. But it would go into flags2 if
 	any code is created where that is needed. */
 
 	ulint	flags = dict_tf_init(post_antelope | compact, zip_ssize,
-				atomic_blobs, data_dir, shared_space,
-				page_compressed, comp_level, atomic_writes);
+				atomic_blobs, data_dir, shared_space);
 
 	return(flags);
 }
@@ -233,13 +229,13 @@ fsp_flags_is_valid(
 	bool	atomic_blobs = FSP_FLAGS_HAS_ATOMIC_BLOBS(flags);
 	ulint	page_ssize = FSP_FLAGS_GET_PAGE_SSIZE(flags);
 	bool	has_data_dir = FSP_FLAGS_HAS_DATA_DIR(flags);
+	ulint	unused = FSP_FLAGS_GET_UNUSED(flags);
 	bool	is_shared = FSP_FLAGS_GET_SHARED(flags);
 	bool	is_temp = FSP_FLAGS_GET_TEMPORARY(flags);
-	bool	is_encryption = FSP_FLAGS_GET_ENCRYPTION(flags);
-	ulint	unused = FSP_FLAGS_GET_UNUSED(flags);
 	bool	page_compression = FSP_FLAGS_GET_PAGE_COMPRESSION(flags);
 	ulint	page_compression_level = FSP_FLAGS_GET_PAGE_COMPRESSION_LEVEL(flags);
 	ulint	atomic_writes = FSP_FLAGS_GET_ATOMIC_WRITES(flags);
+	ulint	mariadb_unused = FSP_FLAGS_GET_UNUSED_MARIADB(flags);
 
 	const char *file;
 	ulint line;
@@ -266,7 +262,7 @@ fsp_flags_is_valid(
 	}
 
 	/* Make sure there are no bits that we do not know about. */
-	if (unused != 0) {
+	if (unused != 0 && mariadb_unused != 0) {
 		GOTO_ERROR;
 	}
 
@@ -291,31 +287,28 @@ fsp_flags_is_valid(
 		return(false);
 	}
 
-	/* Only single-table and not temp tablespaces use the encryption
-	clause. */
-	if (is_encryption && (is_shared || is_temp)) {
-		GOTO_ERROR;
-	}
-
-	/* Page compression level requires page compression and atomic blobs
-	to be set */
-	if (page_compression_level || page_compression) {
-		if (!page_compression || !atomic_blobs) {
-			GOTO_ERROR;
-		}
-	}
-
-	if (atomic_writes > ATOMIC_WRITES_OFF) {
-		GOTO_ERROR;
-		return (false);
-	}
-
 #if UNIV_FORMAT_MAX != UNIV_FORMAT_B
 # error UNIV_FORMAT_MAX != UNIV_FORMAT_B, Add more validations.
 #endif
 #if FSP_FLAGS_POS_UNUSED != 13
-	//# error You have added a new FSP_FLAG without adding a validation check.
+# error You have added a new FSP_FLAG without adding a validation check.
 #endif
+
+	/* Check MariaDB extended flags, these will be removed
+	later. */
+	if (unused != 0) {
+		/* Page compression level requires page
+		compression and atomic blobs to be set */
+		if (page_compression_level || page_compression) {
+			if (!page_compression || !atomic_blobs) {
+				GOTO_ERROR;
+			}
+		}
+
+		if (atomic_writes > ATOMIC_WRITES_OFF) {
+			GOTO_ERROR;
+		}
+	}
 
 	return(true);
 
@@ -328,13 +321,13 @@ err_exit:
 		    << " zip_ssize: " << zip_ssize << " max: " << PAGE_ZIP_SSIZE_MAX
 		    << " page_ssize: " << page_ssize
 		    << " " << UNIV_PAGE_SSIZE_MIN << ":" << UNIV_PAGE_SSIZE_MAX
-		    << " has_data_dir: " << has_data_dir
-		    << " is_shared: " << is_shared
-		    << " is_temp: " << is_temp
-		    << " is_encryption: " << is_encryption
 		    << " page_compressed: " << page_compression
 		    << " page_compression_level: " << page_compression_level
-		    << " atomic_writes: " << atomic_writes;
+		    << " atomic_writes: " << atomic_writes
+		    << " has_data_dir: " << has_data_dir
+		    << " is_shared: " << is_shared
+		    << " is_temp: " << is_temp;
+
 	return (false);
 }
 
@@ -642,7 +635,6 @@ xdes_get_descriptor_with_space_hdr(
 		      || (srv_startup_is_before_trx_rollback_phase
 			  && fspace->id <= srv_undo_tablespaces))));
 	ut_ad(size == fspace->size_in_header);
-	ut_ad(flags == fspace->flags);
 
 	if ((offset >= size) || (offset >= limit)) {
 		return(NULL);
@@ -1674,7 +1666,7 @@ fsp_fill_free_list(
 
 	ut_ad(size == space->size_in_header);
 	ut_ad(limit == space->free_limit);
-	ut_ad(flags == space->flags);
+	ut_ad(fsp_flags_is_equal_mariadb(flags, space->flags));
 
 	const page_size_t	page_size(flags);
 
@@ -3242,8 +3234,6 @@ got_hinted_page:
 		fseg_mark_page_used(seg_inode, ret_page, ret_descr, mtr);
 	}
 
-	ut_ad(space->flags
-	      == mach_read_from_4(FSP_SPACE_FLAGS + space_header));
 	return(fsp_page_create(page_id_t(space_id, ret_page), page_size,
 			       rw_latch, mtr, init_mtr));
 }
@@ -4384,4 +4374,133 @@ fsp_header_get_crypt_offset(
 	}
 
 	return FSP_HEADER_OFFSET + iv_offset;
+}
+
+/** Check if fsp flags contain MariaDB extended flags.
+@param[in] dict_flags dictionary flags
+@param[in] fsp_flags tablespace flags
+@return true if contains MariaDB extended flags, false if not */
+bool
+fsp_is_mariadb_old_flags(
+	ulint	dict_flags,
+	ulint	fsp_flags)
+{
+	if (dict_flags == fsp_flags) {
+		return true;
+	}
+
+	const page_size_t dpage(dict_flags);
+	const page_size_t fpage(fsp_flags);
+
+	bool page_size_equal = dpage.equals_to(fpage);
+	ulint d_antelope = FSP_FLAGS_GET_POST_ANTELOPE(dict_flags);
+	ulint f_antelope = FSP_FLAGS_GET_POST_ANTELOPE(fsp_flags);
+	ulint d_zssize = FSP_FLAGS_GET_ZIP_SSIZE(dict_flags);
+	ulint f_zssize = FSP_FLAGS_GET_ZIP_SSIZE(fsp_flags);
+	ulint d_ablobs = FSP_FLAGS_HAS_ATOMIC_BLOBS(dict_flags);
+	ulint f_ablobs = FSP_FLAGS_HAS_ATOMIC_BLOBS(fsp_flags);
+	ulint d_ddir = FSP_FLAGS_HAS_DATA_DIR(dict_flags);
+	ulint f_ddir = FSP_FLAGS_HAS_DATA_DIR(fsp_flags);
+	ulint f_mddir = FSP_FLAGS_GET_DATA_DIR_MARIADB(fsp_flags);
+	ulint d_mddir = FSP_FLAGS_GET_DATA_DIR_MARIADB(dict_flags);
+
+	/* At this point it is enough if page size and normal
+	flag values match. */
+	if (page_size_equal
+	    && d_antelope == f_antelope
+	    && d_zssize == f_zssize
+	    && d_ablobs == f_ablobs
+	    && ((d_ddir == f_ddir)
+		 || (d_ddir == f_mddir)
+		 || (d_ddir == d_mddir)
+		 || (f_mddir == d_mddir))) {
+		return (true);
+	}
+
+	return false;
+}
+
+/** Check if two fsp flags are equal ignoring
+all MariaDB extended flags.
+@param[in] flags1 tablespace flags
+@param[in] flags2 tablespace flags where to compare
+@return true if equal, false if not */
+bool
+fsp_flags_is_equal_mariadb(
+	ulint	flags1,
+	ulint	flags2)
+{
+	ulint	zip_ssize1 = FSP_FLAGS_GET_ZIP_SSIZE(flags1);
+	bool	atomic_blobs1 = FSP_FLAGS_HAS_ATOMIC_BLOBS(flags1);
+	ulint	unused1 = FSP_FLAGS_GET_UNUSED(flags1);
+	ulint	mariadb_unused1 = FSP_FLAGS_GET_UNUSED_MARIADB(flags1);
+	ulint	zip_ssize2 = FSP_FLAGS_GET_ZIP_SSIZE(flags2);
+	bool	atomic_blobs2 = FSP_FLAGS_HAS_ATOMIC_BLOBS(flags2);
+	ulint	unused2 = FSP_FLAGS_GET_UNUSED(flags2);
+	ulint	mariadb_unused2 = FSP_FLAGS_GET_UNUSED_MARIADB(flags2);
+
+	const page_size_t page_size1(flags1);
+	const page_size_t page_size2(flags2);
+
+	if (flags1 == flags2) {
+		return(true);
+	}
+
+	if (!page_size1.equals_to(page_size2)) {
+		ib::error() << "Page size: " << page_size1
+			    << " does not match " << page_size2;
+		return (false);
+	}
+
+	if (zip_ssize1 != zip_ssize2) {
+		ib::error() << "Flags not equal zip_ssize: " << zip_ssize1
+			    << " zip_ssize: " << zip_ssize2;
+		return(false);
+	}
+
+	if (atomic_blobs1 != atomic_blobs2) {
+		ib::error() << "Flags not equal atomic_blobs: " << atomic_blobs1
+			    << " atomic_blobs: " << atomic_blobs2;
+		return(false);
+	}
+
+	/* Data dir flags difference is ignored. */
+
+	if (unused1 != unused2
+	    && mariadb_unused1 != mariadb_unused2) {
+		ib::error() << "Flags not equal unused: " << unused1
+			    << " unused: " << unused2
+			    << " mariadb_unused: " << mariadb_unused1
+			    << " mariadb_unused: " << mariadb_unused2;
+		return(false);
+	}
+
+	return (true);
+}
+
+/* Check if tablespace flags need fixing. We need to fix them
+if page size flag is on increct place or flags contain MariaDB
+extended flags. */
+bool
+fsp_flags_need_fix(
+	ulint	dict_flags,
+	ulint	fsp_flags)
+{
+	ulint tmp_fsp_flags = dict_tf_to_fsp_flags(dict_flags,
+		false, false);
+	ulint unused = FSP_FLAGS_GET_UNUSED(fsp_flags);
+
+	if (tmp_fsp_flags != fsp_flags || unused) {
+		return (true);
+	}
+
+	ulint page_ssize = FSP_FLAGS_GET_PAGE_SSIZE(fsp_flags);
+	ulint page_ssize2 = FSP_FLAGS_GET_PAGE_SSIZE_MARIADB(fsp_flags);
+	bool has_data_dir = FSP_FLAGS_GET_DATA_DIR_MARIADB(fsp_flags);
+	bool	page_compression = FSP_FLAGS_GET_PAGE_COMPRESSION(fsp_flags);
+	ulint	page_compression_level = FSP_FLAGS_GET_PAGE_COMPRESSION_LEVEL(fsp_flags);
+	ulint	atomic_writes = FSP_FLAGS_GET_ATOMIC_WRITES(fsp_flags);
+	ulint	mariadb_unused = FSP_FLAGS_GET_UNUSED_MARIADB(fsp_flags);
+
+	return (false);
 }

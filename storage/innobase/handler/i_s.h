@@ -65,6 +65,7 @@ extern struct st_maria_plugin	i_s_innodb_sys_virtual;
 extern struct st_maria_plugin	i_s_innodb_tablespaces_encryption;
 extern struct st_maria_plugin	i_s_innodb_tablespaces_scrubbing;
 extern struct st_maria_plugin	i_s_innodb_sys_semaphore_waits;
+extern struct st_maria_plugin	i_s_innodb_sys_table_options;
 
 /** Fill handlerton based INFORMATION_SCHEMA.FILES table.
 @param[in,out]	thd	thread/connection descriptor
@@ -163,4 +164,21 @@ field_store_string(
 	const char*	str);	/*!< in: NUL-terminated utf-8 string,
 				or NULL */
 
+/*******************************************************************//**
+Auxiliary function to store time_t value in MYSQL_TYPE_DATETIME
+field.
+@return 0 on success */
+int
+field_store_time_t(
+/*===============*/
+	Field*	field,	/*!< in/out: target field for storage */
+	time_t	time);	/*!< in: value to store */
+
+/*******************************************************************//**
+Unbind a dynamic INFORMATION_SCHEMA table.
+@return 0 on success */
+int
+i_s_common_deinit(
+/*==============*/
+	void*	p);	/*!< in/out: table schema object */
 #endif /* i_s_h */

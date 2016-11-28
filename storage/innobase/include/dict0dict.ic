@@ -686,15 +686,19 @@ dict_tf_is_valid(
 	ulint	zip_ssize = DICT_TF_GET_ZIP_SSIZE(flags);
 	bool	atomic_blobs = DICT_TF_HAS_ATOMIC_BLOBS(flags);
 	bool	data_dir = DICT_TF_HAS_DATA_DIR(flags);
-	bool	shared_space = DICT_TF_HAS_SHARED_SPACE(flags);
+
+	/* MariaDB does not currently support shared tablespaces */
+	//bool	shared_space = DICT_TF_HAS_SHARED_SPACE(flags);
+	bool	shared_space = false;
 	ulint	unused = DICT_TF_GET_UNUSED(flags);
+	ulint	mariadb_unused = DICT_TF_GET_UNUSED_MARIADB(flags);
+	bool	flags_corrupt = false;
 	bool	page_compression = DICT_TF_GET_PAGE_COMPRESSION(flags);
 	ulint	page_compression_level = DICT_TF_GET_PAGE_COMPRESSION_LEVEL(flags);
 	ulint	atomic_writes = DICT_TF_GET_ATOMIC_WRITES(flags);
-	bool	flags_corrupt = false;
 
 	/* Make sure there are no bits that we do not know about. */
-	if (unused != 0) {
+	if (unused != 0 || mariadb_unused != 0) {
 		flags_corrupt = true;
 	}
 
@@ -726,27 +730,28 @@ dict_tf_is_valid(
 		}
 	}
 
-	if (page_compression || page_compression_level) {
+	/* HAS_DATA_DIR and SHARED_SPACE are mutually exclusive. */
+	if (data_dir && shared_space) {
+		flags_corrupt = true;
+	}
+
+	/* Check also MariaDB extended flags. These will be removed
+	later. */
+	if (unused != 0) {
 		/* Page compression format must have compact and
 		atomic_blobs and page_compression_level requires
 		page_compression */
-		if (!compact
-			|| !page_compression
-			|| !atomic_blobs) {
-			flags_corrupt = true;
+		if (page_compression || page_compression_level) {
+			if (!compact
+				|| !page_compression
+				|| !atomic_blobs) {
+				flags_corrupt = true;
+			}
 		}
-	}
-
-	if (atomic_writes) {
 
 		if(atomic_writes > ATOMIC_WRITES_OFF) {
 			flags_corrupt = true;
 		}
-	}
-
-	/* HAS_DATA_DIR and SHARED_SPACE are mutually exclusive. */
-	if (data_dir && shared_space) {
-		flags_corrupt = true;
 	}
 
 	if (flags_corrupt) {
@@ -758,9 +763,6 @@ dict_tf_is_valid(
 			<< " unused:" << unused
 			<< " data_dir:" << data_dir
 			<< " zip_ssize:" << zip_ssize
-			<< " page_compression:" << page_compression
-			<< " page_compression_level:" << page_compression_level
-			<< " atomic_writes:" << atomic_writes
 			<< " shared_space:" << shared_space;
 		return (false);
 	} else {
@@ -788,7 +790,9 @@ dict_tf2_is_valid(
 	}
 
 	bool	file_per_table = ((flags2 & DICT_TF2_USE_FILE_PER_TABLE) != 0);
-	bool	shared_space = DICT_TF_HAS_SHARED_SPACE(flags);
+	/* MariaDB does not currently support shared tablespaces */
+	//bool	shared_space = DICT_TF_HAS_SHARED_SPACE(flags);
+	bool	shared_space = false;
 
 	if (file_per_table && shared_space) {
 		return(false);
@@ -813,11 +817,7 @@ dict_sys_tables_type_validate(
 	ulint	zip_ssize = DICT_TF_GET_ZIP_SSIZE(type);
 	ulint	atomic_blobs = DICT_TF_HAS_ATOMIC_BLOBS(type);
 	ulint	unused = DICT_TF_GET_UNUSED(type);
-	bool	page_compression = DICT_TF_GET_PAGE_COMPRESSION(type);
-	ulint	page_compression_level = DICT_TF_GET_PAGE_COMPRESSION_LEVEL(type);
-	ulint	atomic_writes = DICT_TF_GET_ATOMIC_WRITES(type);
-
-	ut_a(atomic_writes <= ATOMIC_WRITES_OFF);
+	ulint	mariadb_unused = DICT_TF_GET_UNUSED_MARIADB(type);
 
 	/* The low order bit of SYS_TABLES.TYPE is always set to 1.
 	If the format is UNIV_FORMAT_B or higher, this field is the same
@@ -836,7 +836,9 @@ dict_sys_tables_type_validate(
 	}
 
 	/* Make sure there are no bits that we do not know about. */
-	if (unused) {
+	/* Note that in MariaDB 10.1 has extended dictionary flags
+	and unused is on different position. */
+	if (unused && mariadb_unused) {
 		ib::error()
 			<< "SYS_TABLES::TYPE=" << type << " unused:" << unused;
 		return(ULINT_UNDEFINED);
@@ -884,29 +886,6 @@ dict_sys_tables_type_validate(
 	CREATE TABLE ... DATA DIRECTORY is supported for any row
 	format, so the DATA_DIR flag is compatible with any other
 	table flags. However, it is not used with TEMPORARY tables. */
-
-	if (page_compression || page_compression_level) {
-		/* page compressed row format must have low_order_bit and
-		atomic_blobs bits set and the DICT_N_COLS_COMPACT flag
-		should be in N_COLS, but we already know about the
-		low_order_bit and DICT_N_COLS_COMPACT flags. */
-
-		if (!atomic_blobs || !page_compression) {
-			ib::error() << "SYS_TABLES::TYPE=" << type
-				<< " page_compression:" << page_compression
-				<< " page_compression_level:" << page_compression_level
-				<< " atomic_blobs:" << atomic_blobs;
-
-			return(ULINT_UNDEFINED);
-		}
-	}
-
-	/* Validate that the atomic writes number is within allowed range. */
-	if (atomic_writes > ATOMIC_WRITES_OFF) {
-		ib::error() << "SYS_TABLES::TYPE=" << type
-			    << " atomic_writes:" << atomic_writes;
-			return(ULINT_UNDEFINED);
-	}
 
 	/* Return the validated SYS_TABLES.TYPE. */
 	return(type);
@@ -976,10 +955,7 @@ dict_table_get_format(
 @param[in]	zip_ssize	Zip Shift Size
 @param[in]	use_data_dir	Table uses DATA DIRECTORY
 @param[in]	atomic_writes   Does table use atomic writes
-@param[in]	shared_space	Table uses a General Shared Tablespace
-@param[in]	page_compressed Table uses page compression
-@param[in]	page_compression_level Page compression level
-@param[in]	atomic_writes	Table uses atomic writes */
+@param[in]	shared_space	Table uses a General Shared Tablespace */
 UNIV_INLINE
 void
 dict_tf_set(
@@ -988,10 +964,7 @@ dict_tf_set(
 	rec_format_t	format,
 	ulint		zip_ssize,
 	bool		use_data_dir,
-	bool		shared_space,
-	bool		page_compressed,
-	ulint		page_compression_level,
-	ulint		atomic_writes)
+	bool		shared_space)
 {
 	switch (format) {
 	case REC_FORMAT_REDUNDANT:
@@ -1021,21 +994,6 @@ dict_tf_set(
 	if (shared_space) {
 		*flags |= (1 << DICT_TF_POS_SHARED_SPACE);
 	}
-
-	if (page_compressed) {
-		*flags |= (1 << DICT_TF_POS_ATOMIC_BLOBS)
-		       | (1 << DICT_TF_POS_PAGE_COMPRESSION)
-		       | (page_compression_level << DICT_TF_POS_PAGE_COMPRESSION_LEVEL);
-
-		ut_ad(zip_ssize == 0);
-		ut_ad(dict_tf_get_page_compression(*flags) == TRUE);
-		ut_ad(dict_tf_get_page_compression_level(*flags) == page_compression_level);
-	}
-
-	if (atomic_writes) {
-		*flags |= (atomic_writes << DICT_TF_POS_ATOMIC_WRITES);
-		ut_a(dict_tf_get_atomic_writes(*flags) == atomic_writes);
-	}
 }
 
 /** Initialize a dict_table_t::flags pointer.
@@ -1044,9 +1002,7 @@ dict_tf_set(
 @param[in]	atomic_blobs	Table uses Compressed or Dynamic
 @param[in]	data_dir	Table uses DATA DIRECTORY
 @param[in]	shared_space	Table uses a General Shared Tablespace
-@param[in]	page_compression Table uses page compression
-@param[in]	page_compression_level used compression level
-@param[in]	atomic_writes	Table atomic writes option */
+*/
 UNIV_INLINE
 ulint
 dict_tf_init(
@@ -1054,10 +1010,7 @@ dict_tf_init(
 	ulint		zip_ssize,
 	bool		atomic_blobs,
 	bool		data_dir,
-	bool		shared_space,
-	bool		page_compressed,
-	ulint		page_compression_level,
-	ulint		atomic_writes)
+	bool		shared_space)
 {
 	ulint	flags = 0;
 
@@ -1079,21 +1032,6 @@ dict_tf_init(
 
 	if (shared_space) {
 		flags |= (1 << DICT_TF_POS_SHARED_SPACE);
-	}
-
-	if (page_compressed) {
-		flags |= (1 << DICT_TF_POS_ATOMIC_BLOBS)
-		      | (1 << DICT_TF_POS_PAGE_COMPRESSION)
-		      | (page_compression_level << DICT_TF_POS_PAGE_COMPRESSION_LEVEL);
-
-		ut_ad(zip_ssize == 0);
-		ut_ad(dict_tf_get_page_compression(flags) == TRUE);
-		ut_ad(dict_tf_get_page_compression_level(flags) == page_compression_level);
-	}
-
-	if (atomic_writes) {
-		flags |= (atomic_writes << DICT_TF_POS_ATOMIC_WRITES);
-		ut_a(dict_tf_get_atomic_writes(flags) == atomic_writes);
 	}
 
 	return(flags);
@@ -1122,14 +1060,10 @@ dict_sys_tables_type_to_tf(
 	/* Adjust bit zero. */
 	flags = redundant ? 0 : 1;
 
-	/* ZIP_SSIZE, ATOMIC_BLOBS, DATA_DIR, PAGE_COMPRESSION,
-	PAGE_COMPRESSION_LEVEL, ATOMIC_WRITES are the same. */
+	/* ZIP_SSIZE, ATOMIC_BLOBS, DATA_DIR are the same. */
 	flags |= type & (DICT_TF_MASK_ZIP_SSIZE
 			 | DICT_TF_MASK_ATOMIC_BLOBS
 			 | DICT_TF_MASK_DATA_DIR
-			 | DICT_TF_MASK_PAGE_COMPRESSION
-			 | DICT_TF_MASK_PAGE_COMPRESSION_LEVEL
-			 | DICT_TF_MASK_ATOMIC_WRITES
 			 | DICT_TF_MASK_SHARED_SPACE);
 
 	ut_ad(!DICT_TF_GET_ZIP_SSIZE(flags) || DICT_TF_HAS_ATOMIC_BLOBS(flags));
@@ -1159,14 +1093,10 @@ dict_tf_to_sys_tables_type(
 	/* Adjust bit zero. It is always 1 in SYS_TABLES.TYPE */
 	type = 1;
 
-	/* ZIP_SSIZE, ATOMIC_BLOBS, DATA_DIR, PAGE_COMPRESSION,
-	PAGE_COMPRESSION_LEVEL, ATOMIC_WRITES are the same. */
+	/* ZIP_SSIZE, ATOMIC_BLOBS, DATA_DIR */
 	type |= flags & (DICT_TF_MASK_ZIP_SSIZE
 			 | DICT_TF_MASK_ATOMIC_BLOBS
 			 | DICT_TF_MASK_DATA_DIR
-			 | DICT_TF_MASK_PAGE_COMPRESSION
-			 | DICT_TF_MASK_PAGE_COMPRESSION_LEVEL
-			 | DICT_TF_MASK_ATOMIC_WRITES
 			 | DICT_TF_MASK_SHARED_SPACE);
 
 	return(type);
@@ -1836,8 +1766,19 @@ dict_table_is_intrinsic(
 	return(DICT_TF2_FLAG_IS_SET(table, DICT_TF2_INTRINSIC));
 }
 
+/** Check if the table is in a temporary tablespace.
+@param[in]	table
+@return true if id is a temporary tablespace, false if not. */
+UNIV_INLINE
+bool
+dict_table_in_temporary_tablespace(
+	const dict_table_t*	table)
+{
+	return(table->table_options->is_temporary);
+}
+
 /** Check if the table is in a shared tablespace (System or General).
-@param[in]	id	Space ID to check
+@param[in]	table
 @return true if id is a shared tablespace, false if not. */
 UNIV_INLINE
 bool
@@ -1845,7 +1786,7 @@ dict_table_in_shared_tablespace(
 	const dict_table_t*	table)
 {
 	return(is_system_tablespace(table->space)
-		|| DICT_TF_HAS_SHARED_SPACE(table->flags));
+	       || DICT_TF_HAS_SHARED_SPACE(table->flags));
 }
 
 /** Check whether locking is disabled for this table.
@@ -1898,8 +1839,8 @@ dict_table_is_file_per_table(
 	const dict_table_t*	table)	/*!< in: table to check */
 {
 	bool is_file_per_table =
-		!is_system_tablespace(table->space)
-		&& !DICT_TF_HAS_SHARED_SPACE(table->flags);
+		(!is_system_tablespace(table->space)
+		 && !DICT_TF_HAS_SHARED_SPACE(table->flags));
 
 	/* If the table is file-per-table and it is not redundant, then
 	it should have the flags2 bit for DICT_TF2_USE_FILE_PER_TABLE. */

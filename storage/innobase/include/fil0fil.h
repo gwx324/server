@@ -40,7 +40,7 @@ Created 10/25/1995 Heikki Tuuri
 #include "os0file.h"
 #include "m_string.h"
 #endif /* !UNIV_HOTBACKUP */
-
+#include "my_crypt.h"
 #include <list>
 #include <vector>
 
@@ -93,6 +93,8 @@ is_intermediate_file(const std::string& filepath)
 
 extern const char general_space_name[];
 
+#endif /* UNIV_INNOCHECKSUM */
+
 // Forward declaration
 struct trx_t;
 class page_id_t;
@@ -100,6 +102,137 @@ class truncate_t;
 struct fil_node_t;
 struct fil_space_t;
 struct btr_create_t;
+struct dict_tableoptions_t;
+
+/** The byte offsets on a file page for various variables @{ */
+#define FIL_PAGE_SPACE_OR_CHKSUM 0	/*!< in < MySQL-4.0.14 space id the
+					page belongs to (== 0) but in later
+					versions the 'new' checksum of the
+					page */
+#define FIL_PAGE_OFFSET		4	/*!< page offset inside space */
+#define FIL_PAGE_PREV		8	/*!< if there is a 'natural'
+					predecessor of the page, its
+					offset.  Otherwise FIL_NULL.
+					This field is not set on BLOB
+					pages, which are stored as a
+					singly-linked list.  See also
+					FIL_PAGE_NEXT. */
+#define FIL_PAGE_NEXT		12	/*!< if there is a 'natural' successor
+					of the page, its offset.
+					Otherwise FIL_NULL.
+					B-tree index pages
+					(FIL_PAGE_TYPE contains FIL_PAGE_INDEX)
+					on the same PAGE_LEVEL are maintained
+					as a doubly linked list via
+					FIL_PAGE_PREV and FIL_PAGE_NEXT
+					in the collation order of the
+					smallest user record on each page. */
+#define FIL_PAGE_LSN		16	/*!< lsn of the end of the newest
+					modification log record to the page */
+#define	FIL_PAGE_TYPE		24	/*!< file page type: FIL_PAGE_INDEX,...,
+					2 bytes.
+
+					The contents of this field can only
+					be trusted in the following case:
+					if the page is an uncompressed
+					B-tree index page, then it is
+					guaranteed that the value is
+					FIL_PAGE_INDEX.
+					The opposite does not hold.
+
+					In tablespaces created by
+					MySQL/InnoDB 5.1.7 or later, the
+					contents of this field is valid
+					for all uncompressed pages. */
+#define FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION 26 /*!< for the first page
+					in a system tablespace data file
+					(ibdata*, not *.ibd): the file has
+					been flushed to disk at least up
+					to this lsn
+					for other pages: a 32-bit key version
+					used to encrypt the page + 32-bit checksum
+					or 64 bits of zero if no encryption
+					*/
+/** If page type is FIL_PAGE_COMPRESSED then the 8 bytes starting at
+FIL_PAGE_FILE_FLUSH_LSN are broken down as follows: */
+
+/** Control information version format (u8) */
+static const ulint FIL_PAGE_VERSION = FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION;
+
+/** Compression algorithm (u8) */
+static const ulint FIL_PAGE_ALGORITHM_V1 = FIL_PAGE_VERSION + 1;
+
+/** Original page type (u16) */
+static const ulint FIL_PAGE_ORIGINAL_TYPE_V1 = FIL_PAGE_ALGORITHM_V1 + 1;
+
+/** Original data size in bytes (u16)*/
+static const ulint FIL_PAGE_ORIGINAL_SIZE_V1 = FIL_PAGE_ORIGINAL_TYPE_V1 + 2;
+
+/** Size after compression (u16) */
+static const ulint FIL_PAGE_COMPRESS_SIZE_V1 = FIL_PAGE_ORIGINAL_SIZE_V1 + 2;
+
+/** This overloads FIL_PAGE_FILE_FLUSH_LSN for RTREE Split Sequence Number */
+#define	FIL_RTREE_SPLIT_SEQ_NUM	FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION
+
+/** starting from 4.1.x this contains the space id of the page */
+#define FIL_PAGE_ARCH_LOG_NO_OR_SPACE_ID  34
+
+#define FIL_PAGE_SPACE_ID  FIL_PAGE_ARCH_LOG_NO_OR_SPACE_ID
+
+#define FIL_PAGE_DATA		38U	/*!< start of the data on the page */
+
+/* Following are used when page compression is used */
+#define FIL_PAGE_COMPRESSED_SIZE 2      /*!< Number of bytes used to store
+					actual payload data size on
+					compressed pages. */
+#define FIL_PAGE_COMPRESSION_METHOD_SIZE 2
+					/*!< Number of bytes used to store
+					actual compression method. */
+/* @} */
+/** File page trailer @{ */
+#define FIL_PAGE_END_LSN_OLD_CHKSUM 8	/*!< the low 4 bytes of this are used
+					to store the page checksum, the
+					last 4 bytes should be identical
+					to the last 4 bytes of FIL_PAGE_LSN */
+#define FIL_PAGE_DATA_END	8	/*!< size of the page trailer */
+/* @} */
+
+/** File page types (values of FIL_PAGE_TYPE) @{ */
+#define FIL_PAGE_PAGE_COMPRESSED_ENCRYPTED 37401 /*!< Page is compressed and
+						 then encrypted */
+#define FIL_PAGE_PAGE_COMPRESSED 34354  /*!< page compressed page */
+#define FIL_PAGE_INDEX		17855	/*!< B-tree node */
+#define FIL_PAGE_RTREE		17854	/*!< B-tree node */
+#define FIL_PAGE_UNDO_LOG	2	/*!< Undo log page */
+#define FIL_PAGE_INODE		3	/*!< Index node */
+#define FIL_PAGE_IBUF_FREE_LIST	4	/*!< Insert buffer free list */
+/* File page types introduced in MySQL/InnoDB 5.1.7 */
+#define FIL_PAGE_TYPE_ALLOCATED	0	/*!< Freshly allocated page */
+#define FIL_PAGE_IBUF_BITMAP	5	/*!< Insert buffer bitmap */
+#define FIL_PAGE_TYPE_SYS	6	/*!< System page */
+#define FIL_PAGE_TYPE_TRX_SYS	7	/*!< Transaction system data */
+#define FIL_PAGE_TYPE_FSP_HDR	8	/*!< File space header */
+#define FIL_PAGE_TYPE_XDES	9	/*!< Extent descriptor page */
+#define FIL_PAGE_TYPE_BLOB	10	/*!< Uncompressed BLOB page */
+#define FIL_PAGE_TYPE_ZBLOB	11	/*!< First compressed BLOB page */
+#define FIL_PAGE_TYPE_ZBLOB2	12	/*!< Subsequent compressed BLOB page */
+#define FIL_PAGE_TYPE_UNKNOWN	13	/*!< In old tablespaces, garbage
+					in FIL_PAGE_TYPE is replaced with this
+					value when flushing pages. */
+#define FIL_PAGE_COMPRESSED	14	/*!< Compressed page */
+#define FIL_PAGE_ENCRYPTED	15	/*!< Encrypted page */
+#define FIL_PAGE_COMPRESSED_AND_ENCRYPTED 16
+					/*!< Compressed and Encrypted page */
+#define FIL_PAGE_ENCRYPTED_RTREE 17	/*!< Encrypted R-tree page */
+
+/** Used by i_s.cc to index into the text description. */
+#define FIL_PAGE_TYPE_LAST	FIL_PAGE_TYPE_UNKNOWN
+					/*!< Last page type */
+/* @} */
+
+#ifndef UNIV_INNOCHECKSUM
+
+#include "fil0crypt.h"
 
 /* structure containing encryption specification */
 typedef struct fil_space_crypt_struct fil_space_crypt_t;
@@ -251,6 +384,7 @@ struct fil_space_t {
 	void release_free_extents(ulint n_reserved);
 
 	ulint		magic_n;/*!< FIL_SPACE_MAGIC_N */
+        void*		table_options;
 };
 
 /** Value of fil_space_t::magic_n */
@@ -451,131 +585,6 @@ extern fil_addr_t	fil_addr_null;
 
 #endif /* !UNIV_INNOCHECKSUM */
 
-/** The byte offsets on a file page for various variables @{ */
-#define FIL_PAGE_SPACE_OR_CHKSUM 0	/*!< in < MySQL-4.0.14 space id the
-					page belongs to (== 0) but in later
-					versions the 'new' checksum of the
-					page */
-#define FIL_PAGE_OFFSET		4	/*!< page offset inside space */
-#define FIL_PAGE_PREV		8	/*!< if there is a 'natural'
-					predecessor of the page, its
-					offset.  Otherwise FIL_NULL.
-					This field is not set on BLOB
-					pages, which are stored as a
-					singly-linked list.  See also
-					FIL_PAGE_NEXT. */
-#define FIL_PAGE_NEXT		12	/*!< if there is a 'natural' successor
-					of the page, its offset.
-					Otherwise FIL_NULL.
-					B-tree index pages
-					(FIL_PAGE_TYPE contains FIL_PAGE_INDEX)
-					on the same PAGE_LEVEL are maintained
-					as a doubly linked list via
-					FIL_PAGE_PREV and FIL_PAGE_NEXT
-					in the collation order of the
-					smallest user record on each page. */
-#define FIL_PAGE_LSN		16	/*!< lsn of the end of the newest
-					modification log record to the page */
-#define	FIL_PAGE_TYPE		24	/*!< file page type: FIL_PAGE_INDEX,...,
-					2 bytes.
-
-					The contents of this field can only
-					be trusted in the following case:
-					if the page is an uncompressed
-					B-tree index page, then it is
-					guaranteed that the value is
-					FIL_PAGE_INDEX.
-					The opposite does not hold.
-
-					In tablespaces created by
-					MySQL/InnoDB 5.1.7 or later, the
-					contents of this field is valid
-					for all uncompressed pages. */
-#define FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION 26 /*!< for the first page
-					in a system tablespace data file
-					(ibdata*, not *.ibd): the file has
-					been flushed to disk at least up
-					to this lsn
-					for other pages: a 32-bit key version
-					used to encrypt the page + 32-bit checksum
-					or 64 bits of zero if no encryption
-					*/
-/** If page type is FIL_PAGE_COMPRESSED then the 8 bytes starting at
-FIL_PAGE_FILE_FLUSH_LSN are broken down as follows: */
-
-/** Control information version format (u8) */
-static const ulint FIL_PAGE_VERSION = FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION;
-
-/** Compression algorithm (u8) */
-static const ulint FIL_PAGE_ALGORITHM_V1 = FIL_PAGE_VERSION + 1;
-
-/** Original page type (u16) */
-static const ulint FIL_PAGE_ORIGINAL_TYPE_V1 = FIL_PAGE_ALGORITHM_V1 + 1;
-
-/** Original data size in bytes (u16)*/
-static const ulint FIL_PAGE_ORIGINAL_SIZE_V1 = FIL_PAGE_ORIGINAL_TYPE_V1 + 2;
-
-/** Size after compression (u16) */
-static const ulint FIL_PAGE_COMPRESS_SIZE_V1 = FIL_PAGE_ORIGINAL_SIZE_V1 + 2;
-
-/** This overloads FIL_PAGE_FILE_FLUSH_LSN for RTREE Split Sequence Number */
-#define	FIL_RTREE_SPLIT_SEQ_NUM	FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION
-
-/** starting from 4.1.x this contains the space id of the page */
-#define FIL_PAGE_ARCH_LOG_NO_OR_SPACE_ID  34
-
-#define FIL_PAGE_SPACE_ID  FIL_PAGE_ARCH_LOG_NO_OR_SPACE_ID
-
-#define FIL_PAGE_DATA		38U	/*!< start of the data on the page */
-
-/* Following are used when page compression is used */
-#define FIL_PAGE_COMPRESSED_SIZE 2      /*!< Number of bytes used to store
-					actual payload data size on
-					compressed pages. */
-#define FIL_PAGE_COMPRESSION_METHOD_SIZE 2
-					/*!< Number of bytes used to store
-					actual compression method. */
-/* @} */
-/** File page trailer @{ */
-#define FIL_PAGE_END_LSN_OLD_CHKSUM 8	/*!< the low 4 bytes of this are used
-					to store the page checksum, the
-					last 4 bytes should be identical
-					to the last 4 bytes of FIL_PAGE_LSN */
-#define FIL_PAGE_DATA_END	8	/*!< size of the page trailer */
-/* @} */
-
-/** File page types (values of FIL_PAGE_TYPE) @{ */
-#define FIL_PAGE_PAGE_COMPRESSED_ENCRYPTED 37401 /*!< Page is compressed and
-						 then encrypted */
-#define FIL_PAGE_PAGE_COMPRESSED 34354  /*!< page compressed page */
-#define FIL_PAGE_INDEX		17855	/*!< B-tree node */
-#define FIL_PAGE_RTREE		17854	/*!< B-tree node */
-#define FIL_PAGE_UNDO_LOG	2	/*!< Undo log page */
-#define FIL_PAGE_INODE		3	/*!< Index node */
-#define FIL_PAGE_IBUF_FREE_LIST	4	/*!< Insert buffer free list */
-/* File page types introduced in MySQL/InnoDB 5.1.7 */
-#define FIL_PAGE_TYPE_ALLOCATED	0	/*!< Freshly allocated page */
-#define FIL_PAGE_IBUF_BITMAP	5	/*!< Insert buffer bitmap */
-#define FIL_PAGE_TYPE_SYS	6	/*!< System page */
-#define FIL_PAGE_TYPE_TRX_SYS	7	/*!< Transaction system data */
-#define FIL_PAGE_TYPE_FSP_HDR	8	/*!< File space header */
-#define FIL_PAGE_TYPE_XDES	9	/*!< Extent descriptor page */
-#define FIL_PAGE_TYPE_BLOB	10	/*!< Uncompressed BLOB page */
-#define FIL_PAGE_TYPE_ZBLOB	11	/*!< First compressed BLOB page */
-#define FIL_PAGE_TYPE_ZBLOB2	12	/*!< Subsequent compressed BLOB page */
-#define FIL_PAGE_TYPE_UNKNOWN	13	/*!< In old tablespaces, garbage
-					in FIL_PAGE_TYPE is replaced with this
-					value when flushing pages. */
-#define FIL_PAGE_COMPRESSED	14	/*!< Compressed page */
-#define FIL_PAGE_ENCRYPTED	15	/*!< Encrypted page */
-#define FIL_PAGE_COMPRESSED_AND_ENCRYPTED 16
-					/*!< Compressed and Encrypted page */
-#define FIL_PAGE_ENCRYPTED_RTREE 17	/*!< Encrypted R-tree page */
-
-/** Used by i_s.cc to index into the text description. */
-#define FIL_PAGE_TYPE_LAST	FIL_PAGE_TYPE_UNKNOWN
-					/*!< Last page type */
-/* @} */
 
 /** macro to check whether the page type is index (Btree or Rtree) type */
 #define fil_page_type_is_index(page_type)                          \
@@ -745,15 +754,18 @@ Error messages are issued to the server log.
 @param[in]	id	tablespace identifier
 @param[in]	flags	tablespace flags
 @param[in]	purpose	tablespace purpose
+@param[in]	crypt_data tablespace encryption information
+@param[in]	options tablespace options
 @return pointer to created tablespace, to be filled in with fil_node_create()
 @retval NULL on failure (such as when the same tablespace exists) */
 fil_space_t*
 fil_space_create(
-	const char*	name,
-	ulint		id,
-	ulint		flags,
-	fil_type_t	purpose,	/*!< in: FIL_TABLESPACE, or FIL_LOG if log */
-	fil_space_crypt_t* crypt_data)	/*!< in: crypt data */
+	const char*		name,
+	ulint			id,
+	ulint			flags,
+	fil_type_t		purpose,
+	fil_space_crypt_t*	crypt_data,
+	const void*		options)
 	MY_ATTRIBUTE((warn_unused_result));
 
 /*******************************************************************//**
@@ -1150,8 +1162,7 @@ fil_ibd_create(
 	const char*	path,
 	ulint		flags,
 	ulint		size,
-	fil_encryption_t mode,	/*!< in: encryption mode */
-	ulint		key_id) /*!< in: encryption key_id */
+	dict_tableoptions_t*	table_option)
 	MY_ATTRIBUTE((warn_unused_result));
 
 /********************************************************************//**
@@ -1854,6 +1865,33 @@ void
 fil_decr_pending_ops(
 /*=================*/
 	ulint	id);	/*!< in: space id */
+
+/******************************************************************
+Parse a MLOG_FILE_WRITE_FSP_FLAGS log entry
+@return position on log buffer */
+UNIV_INTERN
+byte*
+fil_parse_write_fsp_flags(
+/*======================*/
+	byte*		ptr,	/*!< in: Log entry start */
+	byte*		end_ptr,/*!< in: Log entry end */
+	buf_block_t*	block)	/*!< in: buffer block */
+	MY_ATTRIBUTE((warn_unused_result));
+
+/******************************************************************
+Update tablespace (fsp) flags on page 0
+@param[in] space  Tablespace
+@param[in] node   File node
+@param[in] page0  Page 0 from tablespace
+@param[in] flags  Tablespace flags in page 0
+@return true if successfull, false if not */
+dberr_t
+fil_update_page0(
+/*=============*/
+	fil_space_t*		space,
+	fil_node_t*		node,
+	ulint			flags)
+	MY_ATTRIBUTE((warn_unused_result));
 
 #endif /* UNIV_INNOCHECKSUM */
 

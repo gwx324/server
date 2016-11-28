@@ -27,3 +27,4 @@
 --loose-innodb_buffer_pool_pages
 --loose-innodb_buffer_pool_pages_index
 --loose-innodb_buffer_pool_pages_blob
+--loose-innodb-sys-table-options

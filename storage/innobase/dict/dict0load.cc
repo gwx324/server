@@ -27,6 +27,13 @@ Created 4/24/1996 Heikki Tuuri
 
 #include "ha_prototypes.h"
 
+#include "univ.i"
+#include "dict0dict.h"
+#include "fil0fil.h"
+#include "my_crypt.h"
+#include "fil0crypt.h"
+#include "dict0types.h"
+#include "dict0tableoptions.h"
 #include "dict0load.h"
 #ifdef UNIV_NONINL
 #include "dict0load.ic"
@@ -63,7 +70,8 @@ static const char* SYSTEM_TABLE_NAME[] = {
 	"SYS_FOREIGN_COLS",
 	"SYS_TABLESPACES",
 	"SYS_DATAFILES",
-	"SYS_VIRTUAL"
+	"SYS_VIRTUAL",
+	"SYS_TABLE_OPTIONS"
 };
 
 /** Loads a table definition and also all its index definitions.
@@ -342,6 +350,7 @@ dict_process_sys_tables_rec_and_mtr_commit(
 		}
 	} else {
 		err_msg = dict_load_table_low(table_name, rec, table);
+
 		mtr_commit(mtr);
 	}
 
@@ -2686,6 +2695,7 @@ dict_load_table_low(
 
 	*table = dict_mem_table_create(
 		name.m_name, space_id, n_cols + n_v_col, n_v_col, flags, flags2);
+
 	(*table)->id = table_id;
 	(*table)->ibd_file_missing = FALSE;
 
@@ -3111,6 +3121,10 @@ err_exit:
 
 	btr_pcur_close(&pcur);
 	mtr_commit(&mtr);
+
+	if (!dict_mem_table_is_system(name.m_name)) {
+		dict_load_table_options(table, heap);
+	}
 
 	dict_load_tablespace(table, heap, ignore_err);
 

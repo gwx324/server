@@ -1318,6 +1318,17 @@ dict_table_open_on_name(
 
 		/* If table is encrypted return table */
 		if (ignore_err == DICT_ERR_IGNORE_NONE
+		    && !table->is_encrypted
+		    && table->table_options) {
+			if ((table->table_options->encryption == FIL_SPACE_ENCRYPTION_ON ||
+			    (table->table_options->encryption == FIL_SPACE_ENCRYPTION_DEFAULT && srv_encrypt_tables))
+				&& !encryption_key_id_exists((unsigned int)table->table_options->encryption_key_id)) {
+				table->is_encrypted = true;
+			}
+		}
+
+		/* If table is encrypted return table */
+		if (ignore_err == DICT_ERR_IGNORE_NONE
 			&& table->is_encrypted) {
 			/* Make life easy for drop table. */
 			dict_table_prevent_eviction(table);
@@ -7453,13 +7464,13 @@ dict_table_t::flags |     0     |    1    |     1      |    1
 fil_space_t::flags  |     0     |    0    |     1      |    1
 @param[in]	table_flags	dict_table_t::flags
 @param[in]	is_temp		whether the tablespace is temporary
-@param[in]	is_encrypted	whether the tablespace is encrypted
+@param[in]	is_encrypted    whether the tablespace is encrypted
 @return tablespace flags (fil_space_t::flags) */
 ulint
 dict_tf_to_fsp_flags(
 	ulint	table_flags,
 	bool	is_temp,
-	bool	is_encrypted)
+	bool	is_encrypted MY_ATTRIBUTE((unused)))
 {
 	DBUG_EXECUTE_IF("dict_tf_to_fsp_flags_failure",
 			return(ULINT_UNDEFINED););
@@ -7468,10 +7479,9 @@ dict_tf_to_fsp_flags(
 				 DICT_TF_HAS_ATOMIC_BLOBS(table_flags);
 	page_size_t	page_size = dict_tf_get_page_size(table_flags);
 	bool		has_data_dir = DICT_TF_HAS_DATA_DIR(table_flags);
-	bool		is_shared = DICT_TF_HAS_SHARED_SPACE(table_flags);
-	bool		page_compression = DICT_TF_GET_PAGE_COMPRESSION(table_flags);
-	ulint		page_compression_level = DICT_TF_GET_PAGE_COMPRESSION_LEVEL(table_flags);
-	ulint		atomic_writes = DICT_TF_GET_ATOMIC_WRITES(table_flags);
+	//bool		is_shared = DICT_TF_HAS_SHARED_SPACE(table_flags);
+	/* In MariaDB we do not currently have shared tablespaces */
+	bool		is_shared = false;
 
 	ut_ad(!page_size.is_compressed() || has_atomic_blobs);
 
@@ -7481,33 +7491,11 @@ dict_tf_to_fsp_flags(
 		has_atomic_blobs = false;
 	}
 
-	ulint		fsp_flags = fsp_flags_init(page_size,
-						   has_atomic_blobs,
-						   has_data_dir,
-						   is_shared,
-						   is_temp,
-						   0,
-						   0,
-						   0,
-						   is_encrypted);
-
-	/* In addition, tablespace flags also contain if the page
-	compression is used for this table. */
-	if (page_compression) {
-		fsp_flags |= FSP_FLAGS_SET_PAGE_COMPRESSION(fsp_flags, page_compression);
-	}
-
-	/* In addition, tablespace flags also contain page compression level
-	if page compression is used for this table. */
-	if (page_compression && page_compression_level) {
-		fsp_flags |= FSP_FLAGS_SET_PAGE_COMPRESSION_LEVEL(fsp_flags, page_compression_level);
-	}
-
-	/* In addition, tablespace flags also contain flag if atomic writes
-	is used for this table */
-	if (atomic_writes) {
-		fsp_flags |= FSP_FLAGS_SET_ATOMIC_WRITES(fsp_flags, atomic_writes);
-	}
+	ulint fsp_flags = fsp_flags_init(page_size,
+		has_atomic_blobs,
+		has_data_dir,
+		is_shared,
+		is_temp);
 
 	ut_ad(fsp_flags_is_valid(fsp_flags));
 

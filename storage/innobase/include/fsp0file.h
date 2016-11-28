@@ -70,7 +70,8 @@ public:
 		m_file_info(),
 		m_encryption_key(NULL),
 		m_encryption_iv(NULL),
-		m_crypt_info()
+		m_crypt_info(),
+		m_temporary(false)
 	{
 		/* No op */
 	}
@@ -96,7 +97,8 @@ public:
 		m_file_info(),
 		m_encryption_key(NULL),
 		m_encryption_iv(NULL),
-		m_crypt_info()
+		m_crypt_info(),
+		m_temporary(false)
 	{
 		ut_ad(m_name != NULL);
 		/* No op */
@@ -120,7 +122,8 @@ public:
 		m_file_info(),
 		m_encryption_key(NULL),
 		m_encryption_iv(NULL),
-		m_crypt_info()
+		m_crypt_info(),
+		m_temporary(false)
 	{
 		m_name = mem_strdup(file.m_name);
 		ut_ad(m_name != NULL);
@@ -184,6 +187,7 @@ public:
 		m_crypt_info = NULL;
 
 		m_atomic_write = file.m_atomic_write;
+		m_temporary = false;
 
 		return(*this);
 	}
@@ -347,6 +351,11 @@ public:
 		return(m_crypt_info);
 	}
 
+	bool is_temporary() const
+	{
+		return(m_temporary);
+	}
+
 	/** Test if the filepath provided looks the same as this filepath
 	by string comparison. If they are two different paths to the same
 	file, same_as() will be used to show that after the files are opened.
@@ -500,6 +509,9 @@ public:
 
 	/** Encryption information */
 	fil_space_crypt_t* 	m_crypt_info;
+
+	/** Is tablespace temporary tablespace ? */
+	bool			m_temporary;
 };
 
 

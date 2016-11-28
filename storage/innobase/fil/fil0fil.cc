@@ -24,6 +24,9 @@ The tablespace memory cache
 Created 10/25/1995 Heikki Tuuri
 *******************************************************/
 
+#include "fil0fil.h"
+#include "rem0rec.h"
+#include "dict0tableoptions.h"
 #include "ha_prototypes.h"
 #include "fil0pagecompress.h"
 #include "fsp0pagecompress.h"
@@ -742,35 +745,6 @@ retry:
 			ut_error;
 		}
 
-		if (space->flags != flags) {
-			ulint sflags = (space->flags & ~FSP_FLAGS_MASK_DATA_DIR);
-			ulint fflags = (flags & ~FSP_FLAGS_MASK_DATA_DIR_ORACLE);
-
-			/* DATA_DIR option is on different place on MariaDB
-			compared to MySQL. If this is the difference. Fix
-			it. */
-
-			if (sflags == fflags) {
-				ib::warn()
-					<< "Tablespace " << space_id
-					<< " flags " << space->flags
-					<< " in the data dictionary but in file " << node->name
-					<< " are " << flags
-					<< ". Temporally corrected because DATA_DIR option to "
-					<< space->flags;
-
-				flags = space->flags;
-			} else {
-				ib::fatal()
-					<< "Table flags are "
-					<< ib::hex(space->flags) << " in the data"
-					" dictionary but the flags in file "
-					<< node->name << " are " << ib::hex(flags)
-					<< "!";
-			}
-		}
-
-
 		{
 			ulint	size		= fsp_header_get_field(
 				page, FSP_SIZE);
@@ -1200,6 +1174,12 @@ fil_space_free_low(
 
 	rw_lock_free(&space->latch);
 
+	fil_space_destroy_crypt_data(&(space->crypt_data));
+
+	if (space->table_options) {
+		ut_free(space->table_options);
+	}
+
 	ut_free(space->name);
 	ut_free(space);
 }
@@ -1261,15 +1241,18 @@ Error messages are issued to the server log.
 @param[in]	id	Tablespace identifier
 @param[in]	flags	Tablespace flags
 @param[in]	purpose	Tablespace purpose
+@param[in]	crypt_data Tablespace encryption information
+@param[in]	options Table options
 @return pointer to created tablespace, to be filled in with fil_node_create()
 @retval NULL on failure (such as when the same tablespace exists) */
 fil_space_t*
 fil_space_create(
-	const char*	name,
-	ulint		id,
-	ulint		flags,
-	fil_type_t	purpose,
-	fil_space_crypt_t* crypt_data)	/*!< in: crypt data */
+	const char*		name,
+	ulint			id,
+	ulint			flags,
+	fil_type_t		purpose,
+	fil_space_crypt_t*	crypt_data,
+	const void*		options)
 {
 	fil_space_t*	space;
 
@@ -1357,12 +1340,30 @@ fil_space_create(
 
 	space->crypt_data = crypt_data;
 
+	space->table_options = static_cast<dict_tableoptions_t*>(
+		ut_zalloc_nokey(sizeof(dict_tableoptions_t)));
+#ifdef UNIV_DEBUG
+	((dict_tableoptions_t*)space->table_options)->magic_n = DICT_TABLEOPTIONS_MAGIC_N;
+#endif
+
+	if (options) {
+		memcpy((dict_tableoptions_t*)space->table_options,
+			(dict_tableoptions_t*)options,
+			sizeof(dict_tableoptions_t));
+		ut_ad(((dict_tableoptions_t*)space->table_options)->magic_n == DICT_TABLEOPTIONS_MAGIC_N);
+	}
+
 	if (crypt_data) {
+		dict_tableoptions_t* to = (dict_tableoptions_t*)space->table_options;
 		space->read_page0 = true;
 		/* If table could be encrypted print info */
-		ib::info() << "Tablespace ID " << id << " name " << space->name
-			   << ":" << fil_crypt_get_mode(crypt_data)
+#ifdef UNIV_DEBUG
+		ib::info() << "Tablespace ID " << id << " name: " << space->name
+			   << " : " << fil_crypt_get_mode(crypt_data)
 			   << " " << fil_crypt_get_type(crypt_data);
+#endif
+		to->encryption = crypt_data->encryption;
+		to->encryption_key_id = crypt_data->key_id;
 	}
 
 	mutex_exit(&fil_system->mutex);
@@ -3421,8 +3422,7 @@ For general tablespaces, the 'dbname/' part may be missing.
 @param[in]	flags		Tablespace flags
 @param[in]	size		Initial size of the tablespace file in
                                 pages, must be >= FIL_IBD_FILE_INITIAL_SIZE
-@param[in]	mode		MariaDB encryption mode
-@param[in]	key_id		MariaDB encryption key_id
+@param[in]	table_option	MariaDB table options
 @return DB_SUCCESS or error code */
 dberr_t
 fil_ibd_create(
@@ -3431,8 +3431,7 @@ fil_ibd_create(
 	const char*	path,
 	ulint		flags,
 	ulint		size,
-	fil_encryption_t mode,
-	ulint		key_id)
+	dict_tableoptions_t* table_option)
 {
 	os_file_t	file;
 	dberr_t		err;
@@ -3527,6 +3526,7 @@ fil_ibd_create(
 		}
 
 		atomic_write = true;
+		table_option->atomic_writes = true;
 	} else {
 		atomic_write = false;
 
@@ -3561,6 +3561,8 @@ fil_ibd_create(
 
 		if (punch_err != DB_SUCCESS) {
 			punch_hole = false;
+		} else {
+			table_option->punch_hole = true;
 		}
 	}
 
@@ -3667,14 +3669,16 @@ fil_ibd_create(
 
 	/* Create crypt data if the tablespace is either encrypted or user has
 	requested it to remain unencrypted. */
-	if (mode == FIL_SPACE_ENCRYPTION_ON || mode == FIL_SPACE_ENCRYPTION_OFF ||
-		srv_encrypt_tables) {
-		crypt_data = fil_space_create_crypt_data(mode, key_id);
+	if (table_option->encryption == FIL_SPACE_ENCRYPTION_ON ||
+	    table_option->encryption == FIL_SPACE_ENCRYPTION_OFF ||
+	    srv_encrypt_tables) {
+		crypt_data = fil_space_create_crypt_data(table_option->encryption,
+			table_option->encryption_key_id);
 	}
 
 	space = fil_space_create(name, space_id, flags, is_temp
 		? FIL_TYPE_TEMPORARY : FIL_TYPE_TABLESPACE,
-		crypt_data);
+		crypt_data, (const void*)table_option);
 
 	if (!fil_node_create_low(
 			path, size, space, false, punch_hole, atomic_write)) {
@@ -3775,7 +3779,7 @@ fil_ibd_open(
 	bool		link_file_found = false;
 	bool		link_file_is_bad = false;
 	bool		is_shared = FSP_FLAGS_GET_SHARED(flags);
-	bool		is_encrypted = FSP_FLAGS_GET_ENCRYPTION(flags);
+	bool		is_encrypted = false;
 	Datafile	df_default;	/* default location */
 	Datafile	df_dict;	/* dictionary location */
 	RemoteDatafile	df_remote;	/* remote location */
@@ -4081,7 +4085,7 @@ fil_ibd_open(
 		if ((path_in != NULL && !dict_filepath_same_as_default)
 		    || (path_in == NULL
 		        && (DICT_TF_HAS_DATA_DIR(flags)
-		            || DICT_TF_HAS_SHARED_SPACE(flags)))
+		            ||  DICT_TF_HAS_SHARED_SPACE(flags)))
 		    || df_remote.filepath() != NULL) {
 			dict_replace_tablespace_and_filepath(
 				id, space_name, df_default.filepath(), flags);
@@ -4094,7 +4098,8 @@ skip_validate:
 			space_name, id, flags, purpose,
 			df_remote.is_open() ? df_remote.get_crypt_info() :
 			df_dict.is_open() ? df_dict.get_crypt_info() :
-			df_default.get_crypt_info());
+			df_default.get_crypt_info(),
+			table ? (const void *)table->table_options : NULL);
 
 		/* We do not measure the size of the file, that is why
 		we pass the 0 below */
@@ -4573,10 +4578,11 @@ fil_ibd_load(
 #endif /* UNIV_HOTBACKUP */
 
 	bool is_temp = FSP_FLAGS_GET_TEMPORARY(file.flags());
+
 	space = fil_space_create(
 		file.name(), space_id, file.flags(),
 		is_temp ? FIL_TYPE_TEMPORARY : FIL_TYPE_TABLESPACE,
-		file.get_crypt_info());
+		file.get_crypt_info(), NULL);
 
 	if (space == NULL) {
 		return(FIL_LOAD_INVALID);
@@ -5267,6 +5273,197 @@ fil_space_get_n_reserved_extents(
 }
 
 /*============================ FILE I/O ================================*/
+
+/******************************************************************
+Set flags for a tablespace */
+static
+void
+fil_space_set_fsp_flags(
+/*=====================*/
+	ulint	id,	/*!< in: space id */
+	uint	flags)	/*!< in: fsp flags */
+{
+	fil_space_t*	space;
+
+	ut_ad(fil_system);
+
+	mutex_enter(&fil_system->mutex);
+
+	space = fil_space_get_by_id(id);
+
+	if (space != NULL) {
+		space->flags = flags;
+	}
+
+	mutex_exit(&fil_system->mutex);
+}
+
+/******************************************************************
+Update tablespace (fsp) flags on page 0
+@param[in] space  Tablespace
+@param[in] node   File node
+@param[in] page0  Page 0 from tablespace
+@param[in] flags  Tablespace flags in page 0
+@return true if successfull, false if not */
+dberr_t
+fil_update_page0(
+/*=============*/
+	fil_space_t*		space,
+	fil_node_t*		node,
+	ulint			flags)
+{
+	ulint tmp_dict_flags = 0;
+	ulint tmp_fsp_flags = 0;
+	dberr_t err = DB_SUCCESS;
+
+	ut_ad(space);
+	ut_ad(node);
+
+	/* Calculate table flags and from there tablespace flags */
+	dict_tf_set(&tmp_dict_flags,
+		dict_tf_get_rec_format(flags),
+		DICT_TF_GET_ZIP_SSIZE(flags),
+		DICT_TF_HAS_DATA_DIR(flags),
+		false);
+
+	tmp_fsp_flags = dict_tf_to_fsp_flags(tmp_dict_flags,
+		false, false);
+
+	const page_id_t page_id(space->id, 0);
+	const page_size_t page_size(tmp_fsp_flags);
+
+	/* Get Tablespace page 0 to buffer pool */
+	/* TODO: Find a way to limit the need to read
+	page 0 here. HINT: check if tablespace flags
+	contain old MariaDB flags. */
+	mtr_t mtr;
+	mtr_start(&mtr);
+	buf_block_t* block = buf_page_get_gen(
+			page_id,
+			page_size,
+			RW_X_LATCH,
+			NULL,
+			BUF_GET,
+			__FILE__, __LINE__,
+			&mtr, &err);
+	byte* page0 = buf_block_get_frame(block);
+
+	flags = fsp_header_get_flags((const page_t*)page0);
+
+	/* If difference we need to fix tablespace flags because
+	they are from older MariaDB version where tablespace flags
+	contained MariaDB extended flags.*/
+	if (space->flags != tmp_fsp_flags || flags != tmp_fsp_flags) {
+		ib::info()
+			<< "Adjusted space_id: " << space->id
+			<< " name: " << space->name
+			<< " tablespace flags from: " << flags
+			<< " to: " << tmp_fsp_flags;
+
+		/* Write new flags to tablespace header */
+		mlog_write_ulint(page0 + FSP_HEADER_OFFSET + FSP_SPACE_FLAGS,
+			tmp_fsp_flags, MLOG_4BYTES, &mtr);
+
+		/* Redo log this as bytewise update to page 0
+		followed by an MLOG_FILE_WRITE_FSP_FLAGS */
+		byte* log_ptr = mlog_open(&mtr, 11 + 8);
+
+		if (log_ptr != NULL) {
+			log_ptr = mlog_write_initial_log_record_fast(
+					page0,
+					MLOG_FILE_WRITE_FSP_FLAGS,
+					log_ptr, &mtr);
+			mach_write_to_4(log_ptr, tmp_fsp_flags);
+			log_ptr += 4;
+			mach_write_to_4(log_ptr, space->id);
+			log_ptr += 4;
+			mlog_close(&mtr, log_ptr);
+		}
+
+		mtr_commit(&mtr);
+
+		lsn_t end_lsn = mtr.commit_lsn();
+		IORequest	request(IORequest::WRITE);
+
+		if (!page_size.is_compressed()) {
+			buf_flush_init_for_writing(NULL, page0, NULL, end_lsn,
+				fsp_is_checksum_disabled(space->id));
+
+			err = os_file_write(
+				request,
+				node->name,
+				node->handle,
+				page0,
+				0,
+				page_size.physical());
+		} else {
+			page_zip_des_t	page_zip;
+			page_zip_set_size(&page_zip, page_size.physical());
+			page_zip.data = page0 + UNIV_PAGE_SIZE;
+#ifdef UNIV_DEBUG
+			page_zip.m_start =
+#endif /* UNIV_DEBUG */
+				page_zip.m_end = page_zip.m_nonempty =
+				page_zip.n_blobs = 0;
+
+			buf_flush_init_for_writing(
+				NULL, page0, &page_zip, 0,
+				fsp_is_checksum_disabled(space->id));
+
+			err = os_file_write(
+				request, node->name, node->handle,
+				page_zip.data, 0,
+				page_size.physical());
+		}
+
+		if (err != DB_SUCCESS) {
+			ib::error()
+				<< "Writing updated page 0 back "
+				<< " to tablespace: " << space->id
+				<< " path: " << node->name
+				<< " failed err: " << err;
+		}
+
+		os_file_flush(node->handle);
+
+		space->flags = tmp_fsp_flags;
+	} else {
+		mtr_commit(&mtr);
+	}
+
+	return(err);
+}
+
+/******************************************************************
+Parse a MLOG_FILE_WRITE_FSP_FLAGS log entry
+@return position on log buffer */
+UNIV_INTERN
+byte*
+fil_parse_write_fsp_flags(
+/*======================*/
+	byte*		ptr,	/*!< in: Log entry start */
+	byte*		end_ptr,/*!< in: Log entry end */
+	buf_block_t*	block)	/*!< in: buffer block */
+{
+	/* check that redo log entry is complete */
+	uint entry_size = 4 + 4; // size of flags + space_id
+
+	if (end_ptr - ptr < entry_size){
+		return NULL;
+	}
+
+	ulint flags = mach_read_from_4(ptr);
+	ptr += 4;
+	ulint space_id = mach_read_from_4(ptr);
+	ptr += 4;
+
+	ut_a(fsp_flags_is_valid(flags));
+
+	/* update fil_space memory cache with flags */
+	fil_space_set_fsp_flags(space_id, flags);
+
+	return ptr;
+}
 
 /********************************************************************//**
 NOTE: you must call fil_mutex_enter_and_prepare_for_io() first!
@@ -6353,9 +6550,11 @@ fil_iterate(
 		bool encrypted = false;
 
 		/* Use additional crypt io buffer if tablespace is encrypted */
-		if ((iter.crypt_data != NULL && iter.crypt_data->encryption == FIL_SPACE_ENCRYPTION_ON) ||
-				(srv_encrypt_tables &&
-					iter.crypt_data && iter.crypt_data->encryption == FIL_SPACE_ENCRYPTION_DEFAULT)) {
+		if ((iter.crypt_data != NULL &&
+		     iter.crypt_data->encryption == FIL_SPACE_ENCRYPTION_ON) ||
+		     (srv_encrypt_tables &&
+		      iter.crypt_data &&
+		      iter.crypt_data->encryption == FIL_SPACE_ENCRYPTION_DEFAULT)) {
 
 			encrypted = true;
 			readptr = iter.crypt_io_buffer;
@@ -6875,7 +7074,7 @@ fil_mtr_rename_log(
 
 	bool	new_is_file_per_table =
 		!is_system_tablespace(new_table->space)
-		&& !DICT_TF_HAS_SHARED_SPACE(new_table->flags);
+		&& !DICT_TF_HAS_SHARED_SPACE(old_table->flags);
 
 	/* If neither table is file-per-table,
 	there will be no renaming of files. */

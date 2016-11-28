@@ -147,18 +147,11 @@ public:
 		return(m_flags);
 	}
 
-	/** Get the tablespace encryption mode
-	@return m_mode tablespace encryption mode */
-	fil_encryption_t encryption_mode() const
+	/** Get the tablespace options
+	@return m_options tablespace options */
+	dict_tableoptions_t* options() const
 	{
-		return (m_mode);
-	}
-
-	/** Get the tablespace encryption key_id
-	@return m_key_id tablespace encryption key_id */
-	ulint key_id() const
-	{
-		return (m_key_id);
+		return (m_options);
 	}
 
 	/** Set Ignore Read Only Status for tablespace.
@@ -244,9 +237,8 @@ private:
 	/** Tablespace flags */
 	ulint		m_flags;
 
-	/** Encryption mode and key_id */
-	fil_encryption_t m_mode;
-	ulint		m_key_id;
+	/** Tablespace options */
+	dict_tableoptions_t* m_options;
 
 protected:
 	/** Ignore server read only configuration for this tablespace. */

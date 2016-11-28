@@ -2243,8 +2243,7 @@ truncate_t::fixup_tables_in_non_system_tablespace()
 					(*it)->m_dir_path,
 					(*it)->m_tablespace_flags,
 					FIL_IBD_FILE_INITIAL_SIZE,
-					(*it)->m_encryption,
-					(*it)->m_key_id);
+					&(*it)->m_table_options);
 
 				if (err != DB_SUCCESS) {
 					/* If checkpoint is not yet done
@@ -2340,14 +2339,15 @@ truncate_t::truncate_t(
 	m_format_flags(),
 	m_indexes(),
 	m_log_lsn(),
-	m_log_file_name(),
-	/* JAN: TODO: Encryption */
-	m_encryption(FIL_SPACE_ENCRYPTION_DEFAULT),
-	m_key_id(FIL_DEFAULT_ENCRYPTION_KEY)
+	m_log_file_name()
 {
 	if (dir_path != NULL) {
 		m_dir_path = mem_strdup(dir_path);
 	}
+
+	memset(&m_table_options, 0, sizeof(dict_tableoptions_t));
+	m_table_options.encryption = FIL_SPACE_ENCRYPTION_DEFAULT;
+	m_table_options.encryption_key_id = FIL_DEFAULT_ENCRYPTION_KEY;
 }
 
 /**
@@ -2367,16 +2367,16 @@ truncate_t::truncate_t(
 	m_format_flags(),
 	m_indexes(),
 	m_log_lsn(),
-	m_log_file_name(),
-	/* JAN: TODO: Encryption */
-	m_encryption(FIL_SPACE_ENCRYPTION_DEFAULT),
-	m_key_id(FIL_DEFAULT_ENCRYPTION_KEY)
-
+	m_log_file_name()
 {
 	m_log_file_name = mem_strdup(log_file_name);
 	if (m_log_file_name == NULL) {
 		ib::fatal() << "Failed creating truncate_t; out of memory";
 	}
+
+	memset(&m_table_options, 0, sizeof(dict_tableoptions_t));
+	m_table_options.encryption = FIL_SPACE_ENCRYPTION_DEFAULT;
+	m_table_options.encryption_key_id = FIL_DEFAULT_ENCRYPTION_KEY;
 }
 
 /** Constructor */

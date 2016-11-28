@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (C) 2013 SkySQL Ab. All Rights Reserved.
+Copyright (c) 2013, 2016, MariaDB Corporation. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -28,25 +28,6 @@ Created 11/12/2013 Jan Lindström jan.lindstrom@skysql.com
 #define dict0pagecompress_h
 
 /********************************************************************//**
-Extract the page compression level from table flags.
-@return	page compression level, or 0 if not compressed */
-UNIV_INLINE
-ulint
-dict_tf_get_page_compression_level(
-/*===============================*/
-	ulint	flags)			/*!< in: flags */
-	__attribute__((const));
-/********************************************************************//**
-Extract the page compression flag from table flags
-@return	page compression flag, or false if not compressed */
-UNIV_INLINE
-ibool
-dict_tf_get_page_compression(
-/*==========================*/
-	ulint	flags)			/*!< in: flags */
-	__attribute__((const));
-
-/********************************************************************//**
 Check whether the table uses the page compressed page format.
 @return	page compression level, or 0 if not compressed */
 UNIV_INLINE
@@ -66,26 +47,6 @@ dict_tf_verify_flags(
 	ulint	table_flags,	/*!< in: dict_table_t::flags */
 	ulint   fsp_flags)     /*!< in: fil_space_t::flags  */
 	__attribute__((const));
-
-/********************************************************************//**
-Extract the atomic writes flag from table flags.
-@return	true if atomic writes are used, false if not used  */
-UNIV_INLINE
-atomic_writes_t
-dict_tf_get_atomic_writes(
-/*======================*/
-	ulint	flags)			/*!< in: flags */
-	__attribute__((const));
-
-/********************************************************************//**
-Check whether the table uses the atomic writes.
-@return	true if atomic writes is used, false if not */
-UNIV_INLINE
-atomic_writes_t
-dict_table_get_atomic_writes(
-/*=========================*/
-	const dict_table_t* table);	/*!< in: table */
-
 
 #ifndef UNIV_NONINL
 #include "dict0pagecompress.ic"

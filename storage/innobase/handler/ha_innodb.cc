@@ -81,6 +81,7 @@ this program; if not, write to the Free Software Foundation, Inc.,
 #include "dict0dict.h"
 #include "dict0stats.h"
 #include "dict0stats_bg.h"
+#include "dict0tableoptions.h"
 #include "fil0fil.h"
 #include "fsp0fsp.h"
 #include "fsp0space.h"
@@ -710,8 +711,6 @@ ha_create_table_option innodb_table_option_list[]=
   /* With this option user can set zip compression level for page
   compression for this table*/
   HA_TOPTION_NUMBER("PAGE_COMPRESSION_LEVEL", page_compression_level, 0, 1, 9, 1),
-  /* With this option user can enable atomic writes feature for this table */
-  HA_TOPTION_ENUM("ATOMIC_WRITES", atomic_writes, "DEFAULT,ON,OFF", 0),
   /* With this option the user can enable encryption for the table */
   HA_TOPTION_ENUM("ENCRYPTED", encryption, "DEFAULT,YES,NO", 0),
   /* With this option the user defines the key identifier using for the encryption */
@@ -4293,7 +4292,7 @@ innobase_init(
 
 	/* Create the filespace flags. */
 	fsp_flags = fsp_flags_init(
-		univ_page_size, false, false, false, false, false, 0, ATOMIC_WRITES_DEFAULT);
+		univ_page_size, false, false, false, false);
 	srv_sys_space.set_flags(fsp_flags);
 
 	srv_sys_space.set_name(reserved_system_space_name);
@@ -4319,7 +4318,7 @@ innobase_init(
 
 	/* Create the filespace flags with the temp flag set. */
 	fsp_flags = fsp_flags_init(
-		univ_page_size, false, false, false, true, false, 0, ATOMIC_WRITES_DEFAULT);
+		univ_page_size, false, false, false, true);
 	srv_tmp_space.set_flags(fsp_flags);
 
 	if (!srv_tmp_space.parse_params(innobase_temp_data_file_path, false)) {
@@ -6841,6 +6840,48 @@ ha_innobase::innobase_initialize_autoinc()
 }
 
 /*****************************************************************//**
+Set up the table options structure based on frm. */
+void
+innobase_set_table_options(
+/*=======================*/
+	THD*			thd,		/*!< in: THD */
+	const TABLE*		table,		/*!< in: MySQL table */
+	dict_tableoptions_t*	options)	/*!< out: table options */
+{
+	ha_table_option_struct* moptions = table->s->option_struct;
+
+	options->page_compressed = moptions->page_compressed;
+	options->page_compression_level = moptions->page_compression_level;
+	options->encryption = (fil_encryption_t)moptions->encryption;
+	options->encryption_key_id = moptions->encryption_key_id;
+	options->atomic_writes = false;
+	options->punch_hole = false;
+	options->is_shared = false;
+	options->is_temporary = false;
+	options->is_stored = false;
+
+	/* Check if we need to store table options persistently.
+	Currently only options needing persistent storage
+	are page compression and encryption. */
+	if (options->page_compressed
+	    || options->encryption) {
+		options->need_stored = true;
+	}
+
+	if (options->encryption_key_id == 0) {
+		options->encryption_key_id = THDVAR(thd, default_encryption_key_id);
+	}
+
+	if (options->page_compression_level == 0) {
+		options->page_compression_level = page_zip_level;
+	}
+
+#ifdef UNIV_DEBUG
+	options->magic_n = DICT_TABLEOPTIONS_MAGIC_N;
+#endif
+}
+
+/*****************************************************************//**
 Creates and opens a handle to a table which already exists in an InnoDB
 database.
 @return 1 if error, 0 if success */
@@ -6864,6 +6905,8 @@ ha_innobase::open(
 	UT_NOT_USED(test_if_locked);
 
 	thd = ha_thd();
+
+	innobase_set_table_options(thd, table, &m_table_options);
 
 	/* Under some cases MySQL seems to call this function while
 	holding search latch(es). This breaks the latching order as
@@ -6907,10 +6950,58 @@ ha_innobase::open(
 	if (ib_table == NULL) {
 
 		ib_table = open_dict_table(name, norm_name, is_part,
-					   ignore_err);
+			ignore_err);
 	} else {
 		ib_table->acquire();
 		ut_ad(dict_table_is_intrinsic(ib_table));
+	}
+
+	/* If tablespace table options are not stored and they
+	need to be stored lets store them and fix possible
+	dictionary and tablespace flag problems. */
+	if (ib_table
+	    && !ib_table->ibd_file_missing
+	    && !dict_table_is_discarded(ib_table)
+	    && !srv_read_only_mode) {
+		dberr_t err = DB_SUCCESS;
+
+		ut_ad(ib_table->table_options->magic_n == DICT_TABLEOPTIONS_MAGIC_N);
+		if (!ib_table->table_options->is_stored) {
+			memcpy(ib_table->table_options,
+			       &m_table_options,
+			       sizeof(dict_tableoptions_t));
+		}
+
+		if (!ib_table->table_options->is_stored
+			&& m_table_options.need_stored) {
+			/* Store tablespace options */
+			err = dict_insert_tableoptions(ib_table, false,
+				NULL, true);
+		}
+
+		/* Update table flags if needed */
+		if (err == DB_SUCCESS) {
+			err = dict_update_table_flags(ib_table, false);
+		}
+
+		/* Update tablespace header flags if needed */
+		if (err == DB_SUCCESS) {
+			mutex_enter(&fil_system->mutex);
+			fil_space_t* space = fil_space_get_by_id(ib_table->space);
+			fil_node_t* node = NULL;
+
+			if (space) {
+				node = UT_LIST_GET_FIRST(space->chain);
+			}
+
+			mutex_exit(&fil_system->mutex);
+
+			if (space && node) {
+				if (fsp_flags_need_fix(ib_table->flags, space->flags)) {
+					err = fil_update_page0(space, node, ib_table->flags);
+				}
+			}
+		}
 	}
 
 	if (ib_table != NULL
@@ -7295,7 +7386,9 @@ platforms.
 @param[in]	table_name	name of the table/partition
 @param[in]	norm_name	normalized name of the table/partition
 @param[in]	is_partition	if this is a partition of a table
-@param[in]	ignore_err	error to ignore for loading dictionary object
+@param[in]	ignore_err	error to ignore for loading dictionary
+object
+@param[in]	table_options	Table options
 @return dictionary table object or NULL if not found */
 dict_table_t*
 ha_innobase::open_dict_table(
@@ -7305,8 +7398,9 @@ ha_innobase::open_dict_table(
 	dict_err_ignore_t	ignore_err)
 {
 	DBUG_ENTER("ha_innobase::open_dict_table");
+
 	dict_table_t*	ib_table = dict_table_open_on_name(norm_name, FALSE,
-							   TRUE, ignore_err);
+		TRUE, ignore_err);
 
 	if (NULL == ib_table && is_partition) {
 		/* MySQL partition engine hard codes the file name
@@ -12061,13 +12155,16 @@ create_table_info_t::create_table_def()
 	ulint		num_v = 0;
 	ulint		space_id = 0;
 	ulint		actual_n_cols;
-	ha_table_option_struct *options= m_form->s->option_struct;
 	dberr_t		err = DB_SUCCESS;
+	dict_tableoptions_t table_options;
 
 	DBUG_ENTER("create_table_def");
 	DBUG_PRINT("enter", ("table_name: %s", m_table_name));
 
 	DBUG_ASSERT(m_trx->mysql_thd == m_thd);
+
+	memset(&table_options, 0, sizeof(dict_tableoptions_t));
+	innobase_set_table_options(m_thd, m_form, &table_options);
 
 	/* MySQL does the name length check. But we do additional check
 	on the name length here */
@@ -12136,6 +12233,10 @@ create_table_info_t::create_table_def()
 
 	table = dict_mem_table_create(m_table_name, space_id,
 				      actual_n_cols, num_v, m_flags, m_flags2);
+
+	/* Copy table options to table */
+	memcpy(table->table_options,
+	       &table_options, sizeof(dict_tableoptions_t));
 
 	/* Set the hidden doc_id column. */
 	if (m_flags2 & DICT_TF2_FTS) {
@@ -12497,9 +12598,7 @@ err_col:
 
 		if (err == DB_SUCCESS) {
 			err = row_create_table_for_mysql(
-				table, algorithm, m_trx, false,
-				(fil_encryption_t)options->encryption,
-				options->encryption_key_id);
+				table, algorithm, m_trx, false);
 
 		}
 
@@ -13345,7 +13444,6 @@ create_table_info_t::check_table_options()
 {
 	enum row_type	row_format = m_form->s->row_type;
 	ha_table_option_struct *options= m_form->s->option_struct;
-	atomic_writes_t awrites = (atomic_writes_t)options->atomic_writes;
 	fil_encryption_t encrypt = (fil_encryption_t)options->encryption;
 
 	if (encrypt != FIL_SPACE_ENCRYPTION_DEFAULT && !m_allow_file_per_table) {
@@ -13462,7 +13560,7 @@ create_table_info_t::check_table_options()
 		options->encryption_key_id = FIL_DEFAULT_ENCRYPTION_KEY;
 	}
 
-	/* If default encryption is used make sure that used kay is found
+	/* If default encryption is used make sure that used key is found
 	from key file. */
 	if (encrypt == FIL_SPACE_ENCRYPTION_DEFAULT &&
 		!srv_encrypt_tables &&
@@ -13476,19 +13574,6 @@ create_table_info_t::check_table_options()
 			);
 			return "ENCRYPTION_KEY_ID";
 
-		}
-	}
-
-	/* Check atomic writes requirements */
-	if (awrites == ATOMIC_WRITES_ON ||
-		(awrites == ATOMIC_WRITES_DEFAULT && srv_use_atomic_writes)) {
-		if (!m_allow_file_per_table) {
-			push_warning(
-				m_thd, Sql_condition::WARN_LEVEL_WARN,
-				HA_WRONG_CREATE_OPTION,
-				"InnoDB: ATOMIC_WRITES requires"
-				" innodb_file_per_table.");
-			return "ATOMIC_WRITES";
 		}
 	}
 
@@ -13653,12 +13738,6 @@ create_table_info_t::innobase_table_flags()
 	/* Cache the value of innodb_file_format, in case it is
 	modified by another thread while the table is being created. */
 	const ulint	file_format_allowed = srv_file_format;
-
-	/* Cache the value of innobase_compression_level, in case it is
-	modified by another thread while the table is being created. */
-	const ulint     default_compression_level = page_zip_level;
-
-	ha_table_option_struct *options= m_form->s->option_struct;
 
 	m_flags = 0;
 	m_flags2 = 0;
@@ -13918,11 +13997,7 @@ index_bad:
 
 	/* Set the table flags */
 	dict_tf_set(&m_flags, innodb_row_format, zip_ssize,
-			m_use_data_dir, m_use_shared_space,
-			options->page_compressed,
-		    	options->page_compression_level == 0 ?
-		        	default_compression_level : options->page_compression_level,
-		    	options->atomic_writes);
+		m_use_data_dir, m_use_shared_space);
 
 	if (m_use_file_per_table) {
 		ut_ad(!m_use_shared_space);
@@ -15303,10 +15378,7 @@ innobase_create_tablespace(
 		atomic_blobs,	/* needed only for compressed tables */
 		false,		/* This is not a file-per-table tablespace */
 		true,		/* This is a general shared tablespace */
-		false,		/* Temporary General Tablespaces not allowed */
-		false,		/* Page compression is not used. */
-		0,		/* Page compression level 0 */
-		ATOMIC_WRITES_DEFAULT); /* No atomic writes yet */
+		false);		/* Temporary General Tablespaces not allowed */
 
 	tablespace.set_flags(fsp_flags);
 
@@ -19947,8 +20019,7 @@ ha_innobase::check_if_incompatible_data(
 
 	/* Changes on engine specific table options requests a rebuild of the table. */
 	if (param_new->page_compressed != param_old->page_compressed ||
-	    param_new->page_compression_level != param_old->page_compression_level ||
-	    param_new->atomic_writes != param_old->atomic_writes) {
+	    param_new->page_compression_level != param_old->page_compression_level) {
 		return(COMPATIBLE_DATA_NO);
 	}
 
@@ -23887,7 +23958,8 @@ i_s_innodb_sys_virtual,
 i_s_innodb_mutexes,
 i_s_innodb_sys_semaphore_waits,
 i_s_innodb_tablespaces_encryption,
-i_s_innodb_tablespaces_scrubbing
+i_s_innodb_tablespaces_scrubbing,
+i_s_innodb_sys_table_options
 maria_declare_plugin_end;
 
 /** @brief Initialize the default value of innodb_commit_concurrency.
@@ -24974,4 +25046,25 @@ ib_push_frm_error(
 		ut_error;
 		break;
 	}
+}
+
+/********************************************************************//**
+Helper function to get default_encryption_key_id from THD
+(trx->mysql_thd).
+@return default_encryption_key_id from THD or
+FIL_DEFAULT_ENCRYPTION_KEY */
+uint
+innobase_get_default_encryption_key_id(
+/*===================================*/
+	trx_t*		trx)	/*! in: trx */
+{
+	uint key_id = FIL_DEFAULT_ENCRYPTION_KEY;
+
+	if (trx && trx->mysql_thd) {
+		THD *thd = (THD *)trx->mysql_thd;
+
+		key_id = THDVAR(thd, default_encryption_key_id);
+	}
+
+	return (key_id);
 }

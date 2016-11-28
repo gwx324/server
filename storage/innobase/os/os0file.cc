@@ -49,6 +49,8 @@ Created 10/21/1995 Heikki Tuuri
 #include "fil0fil.h"
 #include "fil0crypt.h"
 #include "fsp0fsp.h"
+#include "rem0rec.h"
+#include "dict0tableoptions.h"
 #include "fil0pagecompress.h"
 #include "srv0srv.h"
 #ifdef HAVE_LINUX_UNISTD_H

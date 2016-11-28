@@ -81,7 +81,15 @@ public:
 		ssize = (0 == ssize) ? UNIV_PAGE_SSIZE_ORIG : ssize;
 
 		/* Convert from a 'log2 minus 9' to a page size in bytes. */
-		const ulint	size = ((UNIV_ZIP_SIZE_MIN >> 1) << ssize);
+		ulint	size = ((UNIV_ZIP_SIZE_MIN >> 1) << ssize);
+
+		if (size < UNIV_ZIP_SIZE_MIN || size > UNIV_PAGE_SIZE_MAX) {
+			ssize = FSP_FLAGS_GET_PAGE_SSIZE_MARIADB(fsp_flags);
+			ssize = (0 == ssize) ? UNIV_PAGE_SSIZE_ORIG : ssize;
+		}
+
+		/* Convert from a 'log2 minus 9' to a page size in bytes. */
+		size = ((UNIV_ZIP_SIZE_MIN >> 1) << ssize);
 
 		ut_ad(size <= UNIV_PAGE_SIZE_MAX);
 		ut_ad(size <= (1 << PAGE_SIZE_T_SIZE_BITS));

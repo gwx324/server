@@ -1,6 +1,7 @@
 /*****************************************************************************
 
 Copyright (c) 1996, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2014, 2016, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -416,8 +417,7 @@ dict_build_tablespace(
 		datafile->filepath(),
 		tablespace->flags(),
 		FIL_IBD_FILE_INITIAL_SIZE,
-		tablespace->encryption_mode(),
-		tablespace->key_id());
+		tablespace->options());
 
 	if (err != DB_SUCCESS) {
 		return(err);
@@ -533,8 +533,7 @@ dict_build_tablespace_for_table(
 		err = fil_ibd_create(
 			space, table->name.m_name, filepath, fsp_flags,
 			FIL_IBD_FILE_INITIAL_SIZE,
-			node ? node->mode : FIL_SPACE_ENCRYPTION_DEFAULT,
-			node ? node->key_id : FIL_DEFAULT_ENCRYPTION_KEY);
+			table->table_options);
 
 		ut_free(filepath);
 
@@ -1359,9 +1358,7 @@ tab_create_graph_create(
 /*====================*/
 	dict_table_t*	table,	/*!< in: table to create, built as a memory data
 				structure */
-	mem_heap_t*	heap,	/*!< in: heap where created */
-	fil_encryption_t mode,	/*!< in: encryption mode */
-	ulint		key_id)	/*!< in: encryption key_id */
+	mem_heap_t*	heap)	/*!< in: heap where created */
 {
 	tab_node_t*	node;
 
@@ -1374,8 +1371,6 @@ tab_create_graph_create(
 
 	node->state = TABLE_BUILD_TABLE_DEF;
 	node->heap = mem_heap_create(256);
-	node->mode = mode;
-	node->key_id = key_id;
 
 	node->tab_def = ins_node_create(INS_DIRECT, dict_sys->sys_tables,
 					heap);
@@ -2806,4 +2801,111 @@ dict_table_assign_new_id(
 	}
 
 	trx->table_id = table->id;
+}
+
+/****************************************************************//**
+Creates the sys_table_options system tables inside InnoDB
+at server bootstrap or server start if it is not found or is
+not of the right form.
+@return	DB_SUCCESS or error code */
+UNIV_INTERN
+dberr_t
+dict_create_or_check_sys_table_options(void)
+/*========================================*/
+{
+	trx_t*		trx;
+	my_bool		srv_file_per_table_backup;
+	dberr_t		err;
+	dberr_t		sys_tableoptions_err;
+
+	ut_a(srv_get_active_thread_type() == SRV_NONE);
+
+	/* Note: The master thread has not been started at this point. */
+
+	sys_tableoptions_err = dict_check_if_system_table_exists(
+		"SYS_TABLE_OPTIONS", DICT_NUM_FIELDS__SYS_TABLEOPTIONS + 1, 1);
+
+	if (sys_tableoptions_err == DB_SUCCESS) {
+
+		return(DB_SUCCESS);
+	}
+
+	trx = trx_allocate_for_mysql();
+
+	trx_set_dict_operation(trx, TRX_DICT_OP_TABLE);
+
+	trx->op_info = "creating table options sys table";
+
+	row_mysql_lock_data_dictionary(trx);
+
+	/* Check which incomplete table definition to drop. */
+
+	if (sys_tableoptions_err == DB_CORRUPTION) {
+		ib::warn() <<
+			"Dropping incompletely created "
+			"SYS_TABLE_OPTIONS table.";
+		row_drop_table_for_mysql("SYS_TABLE_OPTIONS", trx, TRUE, true);
+	}
+
+	ib::info() << "Creating table options system table.";
+
+	/* We always want SYSTEM tables to be created inside the system
+	tablespace. */
+	srv_file_per_table_backup = srv_file_per_table;
+	srv_file_per_table = 0;
+
+	err = que_eval_sql(
+		NULL,
+		"PROCEDURE CREATE_SYS_TABLE_OPTIONS_PROC () IS\n"
+		"BEGIN\n"
+		"CREATE TABLE SYS_TABLE_OPTIONS(\n"
+		" TABLE_ID BIGINT,"
+		" PAGE_COMPRESSED INT,"
+		" PAGE_COMPRESSION_LEVEL INT,"
+		" ENCRYPTED INT,"
+		" ENCRYPTION_KEY_ID INT,"
+		" IS_SHARED INT,"
+		" IS_TEMPORARY INT"
+		");\n"
+		"CREATE UNIQUE CLUSTERED INDEX SYS_TABLE_OPTIONS_TABLE_ID"
+		" ON SYS_TABLE_OPTIONS (TABLE_ID);\n"
+		"END;\n",
+		FALSE, trx);
+
+	if (err != DB_SUCCESS) {
+		ib::error() <<
+			"Creation of SYS_TABLE_OPTIONS "
+			"has failed with error " << err << ". Tablespace is full. "
+			"Dropping incompletely created tables.";
+
+		ut_a(err == DB_OUT_OF_FILE_SPACE
+		     || err == DB_TOO_MANY_CONCURRENT_TRXS);
+
+		row_drop_table_for_mysql("SYS_TABLE_OPTIONS", trx, false, true);
+
+		if (err == DB_OUT_OF_FILE_SPACE) {
+			err = DB_MUST_GET_MORE_FILE_SPACE;
+		}
+	}
+
+	trx_commit_for_mysql(trx);
+
+	row_mysql_unlock_data_dictionary(trx);
+
+	trx_free_for_mysql(trx);
+
+	srv_file_per_table = srv_file_per_table_backup;
+
+	if (err == DB_SUCCESS) {
+		ib::info() << "Table options system table created.";
+	}
+
+	/* Note: The master thread has not been started at this point. */
+	/* Confirm and move to the non-LRU part of the table LRU list. */
+
+	sys_tableoptions_err = dict_check_if_system_table_exists(
+		"SYS_TABLE_OPTIONS", DICT_NUM_FIELDS__SYS_TABLEOPTIONS + 1, 1);
+	ut_a(sys_tableoptions_err == DB_SUCCESS);
+
+	return(err);
 }

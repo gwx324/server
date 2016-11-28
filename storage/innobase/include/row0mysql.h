@@ -386,9 +386,7 @@ row_create_table_for_mysql(
 				/*!< in: compression algorithm to use,
 				can be NULL */
 	trx_t*		trx,	/*!< in/out: transaction */
-	bool		commit,	/*!< in: if true, commit the transaction */
-	fil_encryption_t mode,	/*!< in: encryption mode */
-	ulint		key_id)	/*!< in: encryption key_id */
+	bool		commit)	/*!< in: if true, commit the transaction */
 	MY_ATTRIBUTE((warn_unused_result));
 
 /*********************************************************************//**

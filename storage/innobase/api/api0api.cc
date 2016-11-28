@@ -28,8 +28,8 @@ InnoDB Native API
 
 #include "api0api.h"
 #include "api0misc.h"
-#include "srv0start.h"
 #include "dict0dict.h"
+#include "srv0start.h"
 #include "btr0pcur.h"
 #include "row0ins.h"
 #include "row0upd.h"

@@ -75,12 +75,6 @@ struct ha_table_option_struct
 						if this option is true. */
 	ulonglong	page_compression_level;	/*!< Table page compression level
 						0-9. */
-	uint		atomic_writes;		/*!< Use atomic writes for this
-						table if this options is ON or
-						in DEFAULT if
-						srv_use_atomic_writes=1.
-						Atomic writes are not used if
-						value OFF.*/
 	uint		encryption;		/*!<  DEFAULT, ON, OFF */
 	ulonglong	encryption_key_id;	/*!< encryption key id  */
 };
@@ -537,6 +531,9 @@ protected:
 
         /** If mysql has locked with external_lock() */
         bool                    m_mysql_has_locked;
+
+	/* Table options */
+	dict_tableoptions_t     m_table_options;
 };
 
 
@@ -916,6 +913,9 @@ private:
 
 	/** Table flags2 */
 	ulint		m_flags2;
+
+	/** InnoDB Table options */
+	ha_table_option_struct* m_table_options;
 };
 
 /**

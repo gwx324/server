@@ -44,13 +44,13 @@
 The parts not included are excluded by #ifndef UNIV_INNOCHECKSUM. */
 
 #include "univ.i"			/* include all of this */
+#include "fil0fil.h"			/* FIL_* */
 #include "page0size.h"			/* page_size_t */
 #include "page0zip.h"			/* page_zip_calc_checksum() */
 #include "page0page.h"			/* PAGE_* */
 #include "trx0undo.h"			/* TRX_UNDO_* */
 #include "fut0lst.h"			/* FLST_NODE_SIZE */
 #include "buf0checksum.h"		/* buf_calc_page_*() */
-#include "fil0fil.h"			/* FIL_* */
 #include "os0file.h"
 #include "fsp0fsp.h"			/* fsp_flags_get_page_size() &
 					   fsp_flags_get_zip_size() */

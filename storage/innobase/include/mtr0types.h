@@ -242,15 +242,21 @@ enum mlog_id_t {
 	/** biggest value (used in assertions) */
 	MLOG_BIGGEST_TYPE = MLOG_INDEX_LOAD,
 
+	/** MariaDB extended log records */
 	/** log record for writing/updating crypt data of
 	a tablespace */
 	MLOG_FILE_WRITE_CRYPT_DATA = 100,
+
+	/** log record for writing/updating tablespace
+	flags */
+	MLOG_FILE_WRITE_FSP_FLAGS  = 101,
 };
 
 /* @} */
 
 #define EXTRA_CHECK_MLOG_NUMBER(x) \
-  ((x) == MLOG_FILE_WRITE_CRYPT_DATA)
+  ((x) == MLOG_FILE_WRITE_CRYPT_DATA || \
+   (x) == MLOG_FILE_WRITE_FSP_FLAGS)
 
 /** Size of a MLOG_CHECKPOINT record in bytes.
 The record consists of a MLOG_CHECKPOINT byte followed by

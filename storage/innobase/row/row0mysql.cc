@@ -3066,9 +3066,7 @@ row_create_table_for_mysql(
 				/*!< in: compression algorithm to use,
 				can be NULL */
 	trx_t*		trx,	/*!< in/out: transaction */
-	bool		commit,	/*!< in: if true, commit the transaction */
-	fil_encryption_t mode,	/*!< in: encryption mode */
-	ulint		key_id)	/*!< in: encryption key_id */
+	bool		commit)	/*!< in: if true, commit the transaction */
 {
 	tab_node_t*	node;
 	mem_heap_t*	heap;
@@ -3121,7 +3119,7 @@ err_exit:
 		ut_ad(strstr(table->name.m_name, "/FTS_") != NULL);
 	}
 
-	node = tab_create_graph_create(table, heap, mode, key_id);
+	node = tab_create_graph_create(table, heap);
 
 	thr = pars_complete_graph_for_exec(node, trx, heap, NULL);
 
@@ -3183,10 +3181,14 @@ err_exit:
 			ut_ad(err == DB_SUCCESS
 				|| err == DB_IO_NO_PUNCH_HOLE_FS);
 #endif /* MYSQL_COMPRESSION */
-			
+
 			/* In non-strict mode we ignore dodgy compression
 			settings. */
 		}
+	}
+
+	if (err == DB_SUCCESS && table->table_options->need_stored) {
+		err = dict_insert_tableoptions(table, true, trx, commit);
 	}
 
 	switch (err) {
@@ -3944,6 +3946,7 @@ row_discard_tablespace(
 		return(err);
 	}
 
+#ifdef MYSQL_ENCRYPTION
 	/* For encrypted table, before we discard the tablespace,
 	we need save the encryption information into table, otherwise,
 	this information will be lost in fil_discard_tablespace along
@@ -3970,6 +3973,7 @@ row_discard_tablespace(
 		       space->encryption_iv,
 		       ENCRYPTION_KEY_LEN);
 	}
+#endif /* MYSQL_ENCRYPTION */
 
 	/* Discard the physical file that is used for the tablespace. */
 
@@ -4812,6 +4816,11 @@ row_drop_table_for_mysql(
 			dict_drop_index_tree_in_mem(index, *page_no++);
 		}
 		err = DB_SUCCESS;
+	}
+
+	/* Delete row from SYS_TABLE_OPTIONS if it exists */
+	if (err == DB_SUCCESS) {
+		err = dict_delete_tableoptions(table, trx, true);
 	}
 
 	switch (err) {

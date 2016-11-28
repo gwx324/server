@@ -64,6 +64,7 @@ SET(INNOBASE_SOURCES
 	dict/dict0stats.cc
 	dict/dict0stats_bg.cc
 	dict/dict0defrag_bg.cc
+	dict/dict0tableoptions.cc
 	eval/eval0eval.cc
 	eval/eval0proc.cc
 	fil/fil0fil.cc
@@ -95,6 +96,7 @@ SET(INNOBASE_SOURCES
 #	handler/ha_innopart.cc
 	handler/handler0alter.cc
 	handler/i_s.cc
+	handler/mariadb_i_s.cc
 	ibuf/ibuf0ibuf.cc
 	lock/lock0iter.cc
 	lock/lock0prdt.cc

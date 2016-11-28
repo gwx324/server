@@ -430,6 +430,14 @@ Datafile::validate_to_dd(
 		return(DB_SUCCESS);
 	}
 
+	/* MariaDB can have extended dictionary and tablespace
+	flags. */
+	if (m_space_id == space_id
+	    && fsp_is_mariadb_old_flags(m_flags, flags)) {
+		/* Datafile matches the tablespace expected. */
+		return (DB_SUCCESS);
+	}
+
 	/* else do not use this tablespace. */
 	m_is_valid = false;
 
@@ -499,11 +507,13 @@ Datafile::validate_for_recovery()
 		break;
 
 	default:
+#ifdef MYSQL_ENCRYPTION
 		/* For encryption tablespace, we skip the retry step,
 		since it is only because the keyring is not ready. */
 		if (FSP_FLAGS_GET_ENCRYPTION(m_flags)) {
 			return(err);
 		}
+#endif /* MYSQL_ENCRYPTION */
 		/* Re-open the file in read-write mode  Attempt to restore
 		page 0 from doublewrite and read the space ID from a survey
 		of the first few pages. */

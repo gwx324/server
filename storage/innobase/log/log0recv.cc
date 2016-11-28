@@ -1274,6 +1274,8 @@ recv_log_format_0_recover(lsn_t lsn)
 			% univ_page_size.physical()),
 		OS_FILE_LOG_BLOCK_SIZE, buf, NULL, NULL);
 
+	log_decrypt_after_read(buf, OS_FILE_LOG_BLOCK_SIZE);
+
 	if (log_block_calc_checksum_format_0(buf)
 	    != log_block_get_checksum(buf)) {
 		ib::error() << NO_UPGRADE_RECOVERY_MSG
@@ -2178,6 +2180,9 @@ recv_parse_or_apply_log_rec_body(
 		break;
 	case MLOG_FILE_WRITE_CRYPT_DATA:
 		ptr = fil_parse_write_crypt_data(ptr, end_ptr, block);
+		break;
+	case MLOG_FILE_WRITE_FSP_FLAGS:
+		ptr = fil_parse_write_fsp_flags(ptr, end_ptr, block);
 		break;
 	default:
 		ptr = NULL;
@@ -4886,6 +4891,9 @@ get_mlog_string(mlog_id_t type)
 
 	case MLOG_FILE_WRITE_CRYPT_DATA:
 		return("MLOG_FILE_WRITE_CRYPT_DATA");
+
+	case MLOG_FILE_WRITE_FSP_FLAGS:
+		return("MLOG_FILE_WRITE_FSP_FLAGS");
 	}
 	DBUG_ASSERT(0);
 	return(NULL);

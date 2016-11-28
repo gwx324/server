@@ -268,94 +268,115 @@ is a tablespace with encryption. */
 				+ FSP_FLAGS_WIDTH_PAGE_SSIZE	\
 				+ FSP_FLAGS_WIDTH_DATA_DIR	\
 				+ FSP_FLAGS_WIDTH_SHARED	\
-				+ FSP_FLAGS_WIDTH_TEMPORARY	\
-				+ FSP_FLAGS_WIDTH_ENCRYPTION	\
-				+ FSP_FLAGS_WIDTH_PAGE_COMPRESSION \
-				+ FSP_FLAGS_WIDTH_PAGE_COMPRESSION_LEVEL \
-				+ FSP_FLAGS_WIDTH_ATOMIC_WRITES )
+				+ FSP_FLAGS_WIDTH_TEMPORARY)
 
 /** A mask of all the known/used bits in tablespace flags */
 #define FSP_FLAGS_MASK		(~(~0U << FSP_FLAGS_WIDTH))
 
 /** Zero relative shift position of the POST_ANTELOPE field */
 #define FSP_FLAGS_POS_POST_ANTELOPE	0
+
 /** Zero relative shift position of the ZIP_SSIZE field */
 #define FSP_FLAGS_POS_ZIP_SSIZE		(FSP_FLAGS_POS_POST_ANTELOPE	\
 					+ FSP_FLAGS_WIDTH_POST_ANTELOPE)
+
 /** Zero relative shift position of the ATOMIC_BLOBS field */
 #define FSP_FLAGS_POS_ATOMIC_BLOBS	(FSP_FLAGS_POS_ZIP_SSIZE	\
 					+ FSP_FLAGS_WIDTH_ZIP_SSIZE)
+
 /** Zero relative shift position of the PAGE_SSIZE field */
 #define FSP_FLAGS_POS_PAGE_SSIZE	(FSP_FLAGS_POS_ATOMIC_BLOBS	\
 					+ FSP_FLAGS_WIDTH_ATOMIC_BLOBS)
+
 /** Zero relative shift position of the start of the DATA_DIR bit */
 #define FSP_FLAGS_POS_DATA_DIR		(FSP_FLAGS_POS_PAGE_SSIZE	\
 					+ FSP_FLAGS_WIDTH_PAGE_SSIZE)
+
 /** Zero relative shift position of the start of the SHARED bit */
 #define FSP_FLAGS_POS_SHARED		(FSP_FLAGS_POS_DATA_DIR		\
 					+ FSP_FLAGS_WIDTH_DATA_DIR)
+
 /** Zero relative shift position of the start of the TEMPORARY bit */
 #define FSP_FLAGS_POS_TEMPORARY		(FSP_FLAGS_POS_SHARED		\
 					+ FSP_FLAGS_WIDTH_SHARED)
+
+/** Zero relative shift position of the start of the UNUSED bits */
+#define FSP_FLAGS_POS_UNUSED		(FSP_FLAGS_POS_TEMPORARY	\
+					+ FSP_FLAGS_WIDTH_TEMPORARY)
+
+#ifdef MYSQL_ENCRYPTION
 /** Zero relative shift position of the start of the ENCRYPTION bit */
 #define FSP_FLAGS_POS_ENCRYPTION	(FSP_FLAGS_POS_TEMPORARY	\
 					+ FSP_FLAGS_WIDTH_TEMPORARY)
+#endif /* MYSQL_ENCRYPTION */
+
 /** Zero relative shift position of the PAGE_COMPRESSION field */
-#define FSP_FLAGS_POS_PAGE_COMPRESSION	(FSP_FLAGS_POS_ENCRYPTION	\
-					+ FSP_FLAGS_WIDTH_ENCRYPTION)
+#define FSP_FLAGS_POS_PAGE_COMPRESSION	(FSP_FLAGS_POS_ATOMIC_BLOBS	\
+					 + FSP_FLAGS_WIDTH_ATOMIC_BLOBS)
+
 /** Zero relative shift position of the PAGE_COMPRESSION_LEVEL field */
 #define FSP_FLAGS_POS_PAGE_COMPRESSION_LEVEL	(FSP_FLAGS_POS_PAGE_COMPRESSION	\
 					+ FSP_FLAGS_WIDTH_PAGE_COMPRESSION)
+
 /** Zero relative shift position of the ATOMIC_WRITES field */
 #define FSP_FLAGS_POS_ATOMIC_WRITES	(FSP_FLAGS_POS_PAGE_COMPRESSION_LEVEL	\
 					+ FSP_FLAGS_WIDTH_PAGE_COMPRESSION_LEVEL)
-/** Zero relative shift position of the start of the UNUSED bits */
-#define FSP_FLAGS_POS_UNUSED		(FSP_FLAGS_POS_ATOMIC_WRITES	\
-					+ FSP_FLAGS_WIDTH_ATOMIC_WRITES)
 
 
 /** Bit mask of the POST_ANTELOPE field */
 #define FSP_FLAGS_MASK_POST_ANTELOPE				\
 		((~(~0U << FSP_FLAGS_WIDTH_POST_ANTELOPE))	\
 		<< FSP_FLAGS_POS_POST_ANTELOPE)
+
 /** Bit mask of the ZIP_SSIZE field */
 #define FSP_FLAGS_MASK_ZIP_SSIZE				\
 		((~(~0U << FSP_FLAGS_WIDTH_ZIP_SSIZE))		\
 		<< FSP_FLAGS_POS_ZIP_SSIZE)
+
 /** Bit mask of the ATOMIC_BLOBS field */
 #define FSP_FLAGS_MASK_ATOMIC_BLOBS				\
 		((~(~0U << FSP_FLAGS_WIDTH_ATOMIC_BLOBS))	\
 		<< FSP_FLAGS_POS_ATOMIC_BLOBS)
+
 /** Bit mask of the PAGE_SSIZE field */
 #define FSP_FLAGS_MASK_PAGE_SSIZE				\
 		((~(~0U << FSP_FLAGS_WIDTH_PAGE_SSIZE))		\
 		<< FSP_FLAGS_POS_PAGE_SSIZE)
+
 /** Bit mask of the DATA_DIR field */
 #define FSP_FLAGS_MASK_DATA_DIR					\
 		((~(~0U << FSP_FLAGS_WIDTH_DATA_DIR))		\
 		<< FSP_FLAGS_POS_DATA_DIR)
+
 /** Bit mask of the SHARED field */
 #define FSP_FLAGS_MASK_SHARED					\
 		((~(~0U << FSP_FLAGS_WIDTH_SHARED))		\
 		<< FSP_FLAGS_POS_SHARED)
+
 /** Bit mask of the TEMPORARY field */
 #define FSP_FLAGS_MASK_TEMPORARY				\
 		((~(~0U << FSP_FLAGS_WIDTH_TEMPORARY))		\
 		<< FSP_FLAGS_POS_TEMPORARY)
+
+#ifdef MYSQL_ENCRYPTION
 /** Bit mask of the ENCRYPTION field */
 #define FSP_FLAGS_MASK_ENCRYPTION				\
 		((~(~0U << FSP_FLAGS_WIDTH_ENCRYPTION))		\
 		<< FSP_FLAGS_POS_ENCRYPTION)
+#endif /* MYSQL_ENCRYPTION */
+
 /** Bit mask of the PAGE_COMPRESSION field */
-#define FSP_FLAGS_MASK_PAGE_COMPRESSION			\
+#define FSP_FLAGS_MASK_PAGE_COMPRESSION				\
 		((~(~0U << FSP_FLAGS_WIDTH_PAGE_COMPRESSION))	\
 		<< FSP_FLAGS_POS_PAGE_COMPRESSION)
+
 /** Bit mask of the PAGE_COMPRESSION_LEVEL field */
-#define FSP_FLAGS_MASK_PAGE_COMPRESSION_LEVEL		\
+#define FSP_FLAGS_MASK_PAGE_COMPRESSION_LEVEL			\
 		((~(~0U << FSP_FLAGS_WIDTH_PAGE_COMPRESSION_LEVEL))	\
 		<< FSP_FLAGS_POS_PAGE_COMPRESSION_LEVEL)
+
 /** Bit mask of the ATOMIC_WRITES field */
-#define FSP_FLAGS_MASK_ATOMIC_WRITES		\
+#define FSP_FLAGS_MASK_ATOMIC_WRITES				\
 		((~(~0U << FSP_FLAGS_WIDTH_ATOMIC_WRITES))	\
 		<< FSP_FLAGS_POS_ATOMIC_WRITES)
 
@@ -363,65 +384,115 @@ is a tablespace with encryption. */
 #define FSP_FLAGS_GET_POST_ANTELOPE(flags)			\
 		((flags & FSP_FLAGS_MASK_POST_ANTELOPE)		\
 		>> FSP_FLAGS_POS_POST_ANTELOPE)
+
 /** Return the value of the ZIP_SSIZE field */
 #define FSP_FLAGS_GET_ZIP_SSIZE(flags)				\
 		((flags & FSP_FLAGS_MASK_ZIP_SSIZE)		\
 		>> FSP_FLAGS_POS_ZIP_SSIZE)
+
 /** Return the value of the ATOMIC_BLOBS field */
 #define FSP_FLAGS_HAS_ATOMIC_BLOBS(flags)			\
 		((flags & FSP_FLAGS_MASK_ATOMIC_BLOBS)		\
 		>> FSP_FLAGS_POS_ATOMIC_BLOBS)
+
 /** Return the value of the PAGE_SSIZE field */
 #define FSP_FLAGS_GET_PAGE_SSIZE(flags)				\
 		((flags & FSP_FLAGS_MASK_PAGE_SSIZE)		\
 		>> FSP_FLAGS_POS_PAGE_SSIZE)
+
 /** Return the value of the DATA_DIR field */
 #define FSP_FLAGS_HAS_DATA_DIR(flags)				\
 		((flags & FSP_FLAGS_MASK_DATA_DIR)		\
 		>> FSP_FLAGS_POS_DATA_DIR)
+
 /** Return the contents of the SHARED field */
 #define FSP_FLAGS_GET_SHARED(flags)				\
 		((flags & FSP_FLAGS_MASK_SHARED)		\
 		>> FSP_FLAGS_POS_SHARED)
+
 /** Return the contents of the TEMPORARY field */
 #define FSP_FLAGS_GET_TEMPORARY(flags)				\
 		((flags & FSP_FLAGS_MASK_TEMPORARY)		\
 		>> FSP_FLAGS_POS_TEMPORARY)
+
+#ifdef MYSQL_ENCRYPTION
 /** Return the contents of the ENCRYPTION field */
 #define FSP_FLAGS_GET_ENCRYPTION(flags)				\
 		((flags & FSP_FLAGS_MASK_ENCRYPTION)		\
 		>> FSP_FLAGS_POS_ENCRYPTION)
+#endif /* MYSQL_ENCRYPTION */
+
 /** Return the contents of the UNUSED bits */
 #define FSP_FLAGS_GET_UNUSED(flags)				\
 		(flags >> FSP_FLAGS_POS_UNUSED)
+
 /** Return the value of the PAGE_COMPRESSION field */
-#define FSP_FLAGS_GET_PAGE_COMPRESSION(flags)		\
+#define FSP_FLAGS_GET_PAGE_COMPRESSION(flags)			\
 		((flags & FSP_FLAGS_MASK_PAGE_COMPRESSION)	\
 		>> FSP_FLAGS_POS_PAGE_COMPRESSION)
+
 /** Return the value of the PAGE_COMPRESSION_LEVEL field */
 #define FSP_FLAGS_GET_PAGE_COMPRESSION_LEVEL(flags)		\
 		((flags & FSP_FLAGS_MASK_PAGE_COMPRESSION_LEVEL) \
 		>> FSP_FLAGS_POS_PAGE_COMPRESSION_LEVEL)
+
 /** Return the value of the ATOMIC_WRITES field */
 #define FSP_FLAGS_GET_ATOMIC_WRITES(flags)		\
 		((flags & FSP_FLAGS_MASK_ATOMIC_WRITES) \
 		>> FSP_FLAGS_POS_ATOMIC_WRITES)
+
 /** Use an alias in the code for FSP_FLAGS_GET_SHARED() */
 #define fsp_is_shared_tablespace FSP_FLAGS_GET_SHARED
+
 /* @} */
 
-/** Set a PAGE_COMPRESSION into the correct bits in a given
-tablespace flags. */
-#define FSP_FLAGS_SET_PAGE_COMPRESSION(flags, compression)	\
-		(flags | (compression << FSP_FLAGS_POS_PAGE_COMPRESSION))
+/** MariaDB extra tablespace flag withds,
+PAGE_COMPRESSION = 1,
+PAGE_COMPRESSION_LEVEL = 4
+ATOMIC_WRITES = 2 */
+#define FSP_EXTRA_POS_MARIADB (FSP_FLAGS_WIDTH_PAGE_COMPRESSION \
+		+ FSP_FLAGS_WIDTH_PAGE_COMPRESSION_LEVEL \
+		+ FSP_FLAGS_WIDTH_ATOMIC_WRITES)
 
-/** Set a PAGE_COMPRESSION_LEVEL into the correct bits in a given
-tablespace flags. */
-#define FSP_FLAGS_SET_PAGE_COMPRESSION_LEVEL(flags, level)	\
-		(flags | (level << FSP_FLAGS_POS_PAGE_COMPRESSION_LEVEL))
+/** Zero relative shift position of the start of the UNUSED bits for
+MariaDB */
+#define FSP_FLAGS_POS_UNUSED_MARIADB	(FSP_FLAGS_POS_DATA_DIR	   \
+					+ FSP_FLAGS_WIDTH_DATA_DIR \
+					+ FSP_EXTRA_POS_MARIADB)
 
-/** Set a ATOMIC_WRITES into the correct bits in a given
-tablespace flags. */
-#define FSP_FLAGS_SET_ATOMIC_WRITES(flags, atomics)	\
-		(flags | (atomics << FSP_FLAGS_POS_ATOMIC_WRITES))
+/** Return the contents of the UNUSED bits for MariaDB */
+#define FSP_FLAGS_GET_UNUSED_MARIADB(flags)		\
+		(flags >> FSP_FLAGS_POS_UNUSED_MARIADB)
+
+/** Zero relative shift position of the PAGE_SSIZE field for MariaDB*/
+#define FSP_FLAGS_POS_PAGE_SSIZE_MARIADB		\
+		(FSP_FLAGS_POS_ATOMIC_BLOBS		\
+		 + FSP_FLAGS_WIDTH_ATOMIC_BLOBS		\
+		 + FSP_EXTRA_POS_MARIADB)
+
+/** Bit mask of the PAGE_SSIZE field for MariaDB */
+#define FSP_FLAGS_MASK_PAGE_SSIZE_MARIADB		        \
+		((~(~0 << FSP_FLAGS_WIDTH_PAGE_SSIZE))		\
+		<< FSP_FLAGS_POS_PAGE_SSIZE_MARIADB)
+
+/** Return the contents of the PAGE_SSIZE bits for MariaDB */
+#define FSP_FLAGS_GET_PAGE_SSIZE_MARIADB(flags)			\
+		((flags & FSP_FLAGS_MASK_PAGE_SSIZE_MARIADB)	\
+		>> FSP_FLAGS_POS_PAGE_SSIZE_MARIADB)
+
+
+/** Zero relative shift position of the DATA DIR field for MariaDB */
+#define FSP_FLAGS_POS_DATA_DIR_MARIADB	(FSP_FLAGS_POS_PAGE_SSIZE	\
+					+ FSP_FLAGS_WIDTH_PAGE_SSIZE)
+
+/** Bit mask of the DATA_DIR field for MariaDB */
+#define FSP_FLAGS_MASK_DATA_DIR_MARIADB				\
+		((~(~0 << FSP_FLAGS_WIDTH_DATA_DIR))		\
+		<< FSP_FLAGS_POS_DATA_DIR_MARIADB)
+
+/** Return the contents of the DATA_DIR bits for MariaDB */
+#define FSP_FLAGS_GET_DATA_DIR_MARIADB(flags)			\
+		((flags & FSP_FLAGS_MASK_DATA_DIR_MARIADB)	\
+		>> FSP_FLAGS_POS_DATA_DIR_MARIADB)
+
 #endif /* fsp0types_h */

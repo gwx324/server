@@ -26,6 +26,12 @@ Created 04/01/2015 Jan Lindström
 #ifndef fil0crypt_h
 #define fil0crypt_h
 
+#include "univ.i"
+#include "log0types.h"
+#include <my_crypt.h>
+
+struct buf_block_t;
+
 /**
 * Magic pattern in start of crypt data on page 0
 */

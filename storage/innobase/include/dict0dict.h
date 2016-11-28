@@ -2,7 +2,7 @@
 
 Copyright (c) 1996, 2016, Oracle and/or its affiliates. All Rights Reserved.
 Copyright (c) 2012, Facebook Inc.
-Copyright (c) 2013, 2015, MariaDB Corporation.
+Copyright (c) 2013, 2016, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -46,6 +46,7 @@ Created 1/8/1996 Heikki Tuuri
 #include "ut0rnd.h"
 #include <deque>
 #include "fsp0fsp.h"
+#include "dict0tableoptions.h"
 #include "dict0pagecompress.h"
 
 extern bool innodb_table_stats_not_found;
@@ -1022,10 +1023,7 @@ dict_tf_set(
 	rec_format_t	format,
 	ulint		zip_ssize,
 	bool		use_data_dir,
-	bool		shared_space,
-	bool		page_compressed,
-	ulint		page_compression_level,
-	ulint		atomic_writes);
+	bool		shared_space);
 
 /** Initialize a dict_table_t::flags pointer.
 @param[in]	compact,	Table uses Compact or greater
@@ -1040,10 +1038,7 @@ dict_tf_init(
 	ulint		zip_ssize,
 	bool		atomic_blobs,
 	bool		data_dir,
-	bool		shared_space,
-	bool		page_compressed,
-	ulint		page_compression_level,
-	ulint		atomic_writes);
+	bool		shared_space);
 
 /** Convert a 32 bit integer table flags to the 32 bit FSP Flags.
 Fsp Flags are written into the tablespace header at the offset
@@ -1057,7 +1052,6 @@ fil_space_t::flags  |     0     |    0    |     1      |    1
 ==================================================================
 @param[in]	table_flags	dict_table_t::flags
 @param[in]	is_temp		whether the tablespace is temporary
-@param[in]	is_encrypted	whether the tablespace is encrypted
 @return tablespace flags (fil_space_t::flags) */
 ulint
 dict_tf_to_fsp_flags(
@@ -1997,16 +1991,6 @@ dict_table_is_discarded(
 	MY_ATTRIBUTE((warn_unused_result));
 
 /********************************************************************//**
-Check if it is a temporary table.
-@return true if temporary table flag is set. */
-UNIV_INLINE
-bool
-dict_table_is_temporary(
-/*====================*/
-	const dict_table_t*	table)	/*!< in: table to check */
-	MY_ATTRIBUTE((warn_unused_result));
-
-/********************************************************************//**
 Check if it is a encrypted table.
 @return true if table encryption flag is set. */
 UNIV_INLINE
@@ -2034,12 +2018,31 @@ dict_table_is_intrinsic(
 	const dict_table_t*	table)
 	MY_ATTRIBUTE((warn_unused_result));
 
+/********************************************************************//**
+Check if it is a temporary table.
+@return true if temporary table flag is set. */
+UNIV_INLINE
+bool
+dict_table_is_temporary(
+/*====================*/
+	const dict_table_t*	table)	/*!< in: table to check */
+	MY_ATTRIBUTE((warn_unused_result));
+
 /** Check if the table is in a shared tablespace (System or General).
 @param[in]	id	Space ID to check
 @return true if id is a shared tablespace, false if not. */
 UNIV_INLINE
 bool
 dict_table_in_shared_tablespace(
+	const dict_table_t*	table)
+	MY_ATTRIBUTE((warn_unused_result));
+
+/** Check if the table is in a temporary tablespace.
+@param[in]	table
+@return true if id is a temporary tablespace, false if not. */
+UNIV_INLINE
+bool
+dict_table_in_temporary_tablespace(
 	const dict_table_t*	table)
 	MY_ATTRIBUTE((warn_unused_result));
 

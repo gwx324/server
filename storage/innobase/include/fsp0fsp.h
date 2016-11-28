@@ -496,7 +496,8 @@ fseg_alloc_free_page_general(
 				FSP_UP, FSP_NO_DIR */
 	ibool		has_done_reservation, /*!< in: TRUE if the caller has
 				already done the reservation for the page
-				with fsp_reserve_free_extents, then there
+			
+	with fsp_reserve_free_extents, then there
 				is no need to do the check for this individual
 				page */
 	mtr_t*		mtr,	/*!< in/out: mini-transaction */
@@ -686,7 +687,6 @@ fsp_flags_are_equal(
 @param[in]	has_data_dir	This tablespace is in a remote location.
 @param[in]	is_shared	This tablespace can be shared by many tables.
 @param[in]	is_temporary	This tablespace is temporary.
-@param[in]	is_encrypted	This tablespace is encrypted.
 @return tablespace flags after initialization */
 UNIV_INLINE
 ulint
@@ -695,11 +695,7 @@ fsp_flags_init(
 	bool			atomic_blobs,
 	bool			has_data_dir,
 	bool			is_shared,
-	bool			is_temporary,
-	bool			page_compression,
-	ulint			page_compression_level,
-	ulint			atomic_writes,
-	bool			is_encrypted = false);
+	bool			is_temporary);
 
 /** Convert a 32 bit integer tablespace flags to the 32 bit table flags.
 This can only be done for a tablespace that was built as a file-per-table
@@ -716,6 +712,36 @@ ulint
 fsp_flags_to_dict_tf(
 	ulint	fsp_flags,
 	bool	compact);
+
+/** Check if fsp flags contain MariaDB extended flags.
+@param[in] dict_flags dictionary flags
+@param[in] fsp_flags tablespace flags
+@return true if contains MariaDB extended flags, false if not */
+bool
+fsp_is_mariadb_old_flags(
+	ulint	dict_flags,
+	ulint	fsp_flags)
+	MY_ATTRIBUTE((warn_unused_result));
+
+/** Check if two fsp flags are equal ignoring
+all MariaDB extended flags.
+@param[in] flags1 tablespace flags
+@param[in] flags2 tablespace flags where to compare
+@return true if equal, false if not */
+bool
+fsp_flags_is_equal_mariadb(
+	ulint	flags1,
+	ulint	flags2)
+	MY_ATTRIBUTE((warn_unused_result));
+
+/* Check if tablespace flags need fixing. We need to fix them
+if page size flag is on increct place or flags contain MariaDB
+extended flags. */
+bool
+fsp_flags_need_fix(
+	ulint	dict_flags,
+	ulint	fsp_flags)
+	MY_ATTRIBUTE((warn_unused_result));
 
 /** Calculates the descriptor index within a descriptor page.
 @param[in]	page_size	page size

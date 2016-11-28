@@ -638,8 +638,8 @@ ha_innobase::check_if_supported_inplace_alter(
 		ha_table_option_struct *old_options= table->s->option_struct;
 
 		if (new_options->page_compressed != old_options->page_compressed ||
-		    new_options->page_compression_level != old_options->page_compression_level ||
-			new_options->atomic_writes != old_options->atomic_writes) {
+			new_options->page_compression_level != old_options->page_compression_level) {
+
 			ha_alter_info->unsupported_reason = innobase_get_err_msg(
 				ER_ALTER_OPERATION_NOT_SUPPORTED_REASON);
 			DBUG_RETURN(HA_ALTER_INPLACE_NOT_SUPPORTED);
@@ -4663,7 +4663,6 @@ prepare_inplace_alter_table_dict(
 	to rebuild the table with a temporary name. */
 
 	if (new_clustered) {
-		fil_space_crypt_t* crypt_data;
 		const char*	new_table_name
 			= dict_mem_create_temporary_tablename(
 				ctx->heap,
@@ -4674,16 +4673,7 @@ prepare_inplace_alter_table_dict(
 		ulint		n_mv_cols = 0;
 		dtuple_t*	add_cols;
 		ulint		space_id = 0;
-		ulint		key_id = FIL_DEFAULT_ENCRYPTION_KEY;
-		fil_encryption_t mode = FIL_SPACE_ENCRYPTION_DEFAULT;
 		const char*	compression=NULL;
-
-		crypt_data = fil_space_get_crypt_data(ctx->prebuilt->table->space);
-
-		if (crypt_data) {
-			key_id = crypt_data->key_id;
-			mode = crypt_data->encryption;
-		}
 
 		if (innobase_check_foreigns(
 			    ha_alter_info, altered_table, old_table,
@@ -4746,6 +4736,11 @@ prepare_inplace_alter_table_dict(
 		ctx->new_table = dict_mem_table_create(
 			new_table_name, space_id, n_cols + n_v_cols, n_v_cols,
 			flags, flags2);
+
+		/* These can be inherited from old table as currently we
+		do not support in-place alter for these */
+		memcpy(ctx->new_table->table_options, ctx->prebuilt->table->table_options,
+			sizeof(dict_tableoptions_t));
 
 		/* The rebuilt indexed_table will use the renamed
 		column names. */
@@ -4901,7 +4896,7 @@ prepare_inplace_alter_table_dict(
 #endif /* MYSQL_COMPRESSION */
 
 		error = row_create_table_for_mysql(
-			ctx->new_table, compression, ctx->trx, false, mode, key_id);
+			ctx->new_table, compression, ctx->trx, false);
 
 		punch_hole_warning =
 			(error == DB_IO_NO_PUNCH_HOLE_FS)

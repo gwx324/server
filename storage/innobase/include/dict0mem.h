@@ -30,6 +30,8 @@ Created 1/8/1996 Heikki Tuuri
 
 #include "univ.i"
 #include "dict0types.h"
+#include "fil0fil.h"
+#include "dict0tableoptions.h"
 #include "data0type.h"
 #include "mem0mem.h"
 #include "row0types.h"
@@ -51,7 +53,6 @@ Created 1/8/1996 Heikki Tuuri
 #include "os0once.h"
 #include "ut0new.h"
 
-#include "fil0fil.h"
 #include <my_crypt.h>
 #include "fil0crypt.h"
 #include <set>
@@ -171,12 +172,8 @@ DEFAULT=0, ON = 1, OFF = 2
 			+ DICT_TF_WIDTH_ZIP_SSIZE		\
 			+ DICT_TF_WIDTH_ATOMIC_BLOBS		\
 			+ DICT_TF_WIDTH_DATA_DIR		\
-			+ DICT_TF_WIDTH_SHARED_SPACE		\
-			+ DICT_TF_WIDTH_PAGE_COMPRESSION	\
-			+ DICT_TF_WIDTH_PAGE_COMPRESSION_LEVEL	\
-			+ DICT_TF_WIDTH_ATOMIC_WRITES		\
-			+ DICT_TF_WIDTH_PAGE_ENCRYPTION		\
-			+ DICT_TF_WIDTH_PAGE_ENCRYPTION_KEY)
+			+ DICT_TF_WIDTH_SHARED_SPACE)
+
 
 /** A mask of all the known/used bits in table flags */
 #define DICT_TF_BIT_MASK	(~(~0U << DICT_TF_BITS))
@@ -195,9 +192,13 @@ DEFAULT=0, ON = 1, OFF = 2
 /** Zero relative shift position of the SHARED TABLESPACE field */
 #define DICT_TF_POS_SHARED_SPACE	(DICT_TF_POS_DATA_DIR		\
 					+ DICT_TF_WIDTH_DATA_DIR)
-/** Zero relative shift position of the PAGE_COMPRESSION field */
-#define DICT_TF_POS_PAGE_COMPRESSION	(DICT_TF_POS_SHARED_SPACE	\
+#define DICT_TF_POS_UNUSED		(DICT_TF_POS_SHARED_SPACE	\
 					+ DICT_TF_WIDTH_SHARED_SPACE)
+
+/** Zero relative shift position of the PAGE_COMPRESSION field */
+#define DICT_TF_POS_PAGE_COMPRESSION	(DICT_TF_POS_ATOMIC_BLOBS	\
+					+ DICT_TF_WIDTH_ATOMIC_BLOBS)
+
 /** Zero relative shift position of the PAGE_COMPRESSION_LEVEL field */
 #define DICT_TF_POS_PAGE_COMPRESSION_LEVEL	(DICT_TF_POS_PAGE_COMPRESSION	\
 					+ DICT_TF_WIDTH_PAGE_COMPRESSION)
@@ -210,7 +211,7 @@ DEFAULT=0, ON = 1, OFF = 2
 /** Zero relative shift position of the PAGE_ENCRYPTION_KEY field */
 #define DICT_TF_POS_PAGE_ENCRYPTION_KEY	(DICT_TF_POS_PAGE_ENCRYPTION	\
 					+ DICT_TF_WIDTH_PAGE_ENCRYPTION)
-#define DICT_TF_POS_UNUSED		(DICT_TF_POS_PAGE_ENCRYPTION_KEY     \
+#define DICT_TF_POS_UNUSED_MARIADB	(DICT_TF_POS_PAGE_ENCRYPTION_KEY     \
 					+ DICT_TF_WIDTH_PAGE_ENCRYPTION_KEY)
 
 /** Bit mask of the COMPACT field */
@@ -229,10 +230,12 @@ DEFAULT=0, ON = 1, OFF = 2
 #define DICT_TF_MASK_DATA_DIR				\
 		((~(~0U << DICT_TF_WIDTH_DATA_DIR))	\
 		<< DICT_TF_POS_DATA_DIR)
+
 /** Bit mask of the SHARED_SPACE field */
 #define DICT_TF_MASK_SHARED_SPACE			\
 		((~(~0U << DICT_TF_WIDTH_SHARED_SPACE))	\
 		<< DICT_TF_POS_SHARED_SPACE)
+
 /** Bit mask of the PAGE_COMPRESSION field */
 #define DICT_TF_MASK_PAGE_COMPRESSION			\
 		((~(~0U << DICT_TF_WIDTH_PAGE_COMPRESSION)) \
@@ -270,10 +273,12 @@ DEFAULT=0, ON = 1, OFF = 2
 #define DICT_TF_HAS_DATA_DIR(flags)			\
 		((flags & DICT_TF_MASK_DATA_DIR)	\
 		>> DICT_TF_POS_DATA_DIR)
+
 /** Return the value of the SHARED_SPACE field */
 #define DICT_TF_HAS_SHARED_SPACE(flags)			\
 		((flags & DICT_TF_MASK_SHARED_SPACE)	\
 		>> DICT_TF_POS_SHARED_SPACE)
+
 /** Return the value of the PAGE_COMPRESSION field */
 #define DICT_TF_GET_PAGE_COMPRESSION(flags)	       \
 		((flags & DICT_TF_MASK_PAGE_COMPRESSION) \
@@ -298,7 +303,8 @@ DEFAULT=0, ON = 1, OFF = 2
 /** Return the contents of the UNUSED bits */
 #define DICT_TF_GET_UNUSED(flags)			\
 		(flags >> DICT_TF_POS_UNUSED)
-/* @} */
+#define DICT_TF_GET_UNUSED_MARIADB(flags)		\
+		(flags >> DICT_TF_POS_UNUSED_MARIADB)/* @} */
 
 /** @brief Table Flags set number 2.
 
@@ -1894,9 +1900,6 @@ public:
 	/** Value of 'magic_n'. */
 	#define DICT_TABLE_MAGIC_N		76333786
 
-	/** Magic number. */
-	ulint					magic_n;
-#endif /* UNIV_DEBUG */
 	/** mysql_row_templ_t for base columns used for compute the virtual
 	columns */
 	dict_vcol_templ_t*			vc_templ;
@@ -1906,6 +1909,13 @@ public:
 
 	/** encryption iv, it's only for export/import */
 	byte*					encryption_iv;
+
+	/** table options from server */
+	dict_tableoptions_t*			table_options;
+
+	/** Magic number. */
+	ulint					magic_n;
+#endif /* UNIV_DEBUG */
 };
 
 /*******************************************************************//**

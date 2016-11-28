@@ -43,9 +43,7 @@ tab_create_graph_create(
 /*====================*/
 	dict_table_t*	table,		/*!< in: table to create, built as
 					a memory data structure */
-	mem_heap_t*	heap,		/*!< in: heap where created */
-	fil_encryption_t mode,		/*!< in: encryption mode */
-	ulint		key_id);	/*!< in: encryption key_id */
+	mem_heap_t*	heap);		/*!< in: heap where created */
 
 /** Creates an index create graph.
 @param[in]	index	index to create, built as a memory data structure
@@ -291,6 +289,17 @@ dict_foreign_def_get(
 /*=================*/
 	dict_foreign_t*	foreign,/*!< in: foreign */
 	trx_t*		trx);	/*!< in: trx */
+
+/****************************************************************//**
+Creates the sys_table_options system tables inside InnoDB
+at server bootstrap or server start if it is not found or is
+not of the right form.
+@return	DB_SUCCESS or error code */
+UNIV_INTERN
+dberr_t
+dict_create_or_check_sys_table_options(void)
+/*========================================*/
+__attribute__((warn_unused_result));
 
 /* Table create node structure */
 struct tab_node_t{

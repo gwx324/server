@@ -654,5 +654,17 @@ buffer pool size.
 void
 innodb_set_buf_pool_size(ulonglong buf_pool_size);
 
+
+/********************************************************************//**
+Helper function to get default_encryption_key_id from THD
+(trx->mysql_thd).
+@return default_encryption_key_id from THD or
+FIL_DEFAULT_ENCRYPTION_KEY */
+uint
+innobase_get_default_encryption_key_id(
+/*===================================*/
+	trx_t*		trx);	/*! in: trx */
+
 #endif /* !UNIV_HOTBACKUP && !UNIV_INNOCHECKSUM */
+
 #endif /* HA_INNODB_PROTOTYPES_H */

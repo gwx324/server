@@ -2,6 +2,7 @@
 
 Copyright (c) 1996, 2016, Oracle and/or its affiliates. All Rights Reserved.
 Copyright (c) 2012, Facebook Inc.
+Copyright (c) 2015, 2016, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -132,6 +133,14 @@ dict_mem_table_create(
 	table->heap = heap;
 
 	ut_d(table->magic_n = DICT_TABLE_MAGIC_N);
+
+	table->table_options =  static_cast<dict_tableoptions_t*>(
+		mem_heap_zalloc(heap, sizeof(dict_tableoptions_t)));
+
+	table->table_options->encryption_key_id = FIL_DEFAULT_ENCRYPTION_KEY;
+#ifdef UNIV_DEBUG
+	table->table_options->magic_n =  DICT_TABLEOPTIONS_MAGIC_N;
+#endif
 
 	table->flags = (unsigned int) flags;
 	table->flags2 = (unsigned int) flags2;
