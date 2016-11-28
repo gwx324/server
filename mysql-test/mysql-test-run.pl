@@ -180,6 +180,7 @@ my @DEFAULT_SUITES= qw(
     innodb-
     innodb_fts-
     innodb_zip-
+    innodb_gis-
     maria-
     multi_source-
     optimizer_unfixed_bugs-
